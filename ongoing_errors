@@ -1,0 +1,13 @@
+beginning
+
+VM689 vendor.js:159 Uncaught (in promise) Error: No Listener: tabs:outgoing.message.ready
+    at g (VM689 vendor.js:159:18553)
+    
+
+selecting dice of 10
+
+main.js:416 Uncaught TypeError: Cannot read properties of null (reading 'count')
+    at createPhysicsShape (main.js:416:31)
+    at createDie (main.js:359:17)
+    at createDice (main.js:436:15)
+    at HTMLSelectElement.<anonymous> (main.js:612:3)
