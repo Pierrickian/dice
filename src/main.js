@@ -299,7 +299,41 @@ function createDieGeometry(faceCount) {
 }
 
 function createD10Geometry() {
-  return new THREE.DodecahedronGeometry(0.9, 0)
+  const radius = 1
+  const midZ = 0.3
+  const topZ = 1.1
+  const vertices = []
+  const indices = []
+
+  vertices.push(0, 0, topZ)
+  vertices.push(0, 0, -topZ)
+
+  const ringCount = 5
+  for (let i = 0; i < ringCount; i += 1) {
+    const angle = (i * Math.PI * 2) / ringCount
+    vertices.push(radius * Math.cos(angle), radius * Math.sin(angle), midZ)
+  }
+  for (let i = 0; i < ringCount; i += 1) {
+    const angle = (i * Math.PI * 2) / ringCount + Math.PI / ringCount
+    vertices.push(radius * Math.cos(angle), radius * Math.sin(angle), -midZ)
+  }
+
+  for (let i = 0; i < ringCount; i += 1) {
+    const next = (i + 1) % ringCount
+    const topIndex = 0
+    const bottomIndex = 1
+    const upperA = 2 + i
+    const upperB = 2 + next
+    const lowerA = 2 + ringCount + i
+    const lowerB = 2 + ringCount + next
+
+    indices.push(topIndex, upperA, lowerA)
+    indices.push(topIndex, lowerA, upperB)
+    indices.push(bottomIndex, lowerA, upperA)
+    indices.push(bottomIndex, upperB, lowerA)
+  }
+
+  return new THREE.PolyhedronGeometry(vertices, indices, 1, 0)
 }
 
 function createDie(x, z, index) {
@@ -363,7 +397,6 @@ function createPhysicsShape(geometry, faceCount) {
     return new CANNON.Box(halfSize)
   } else {
     const position = geometry.attributes.position
-    const index = geometry.index
     const vertices = []
     for (let i = 0; i < position.count; i++) {
       vertices.push(new CANNON.Vec3(
@@ -373,8 +406,15 @@ function createPhysicsShape(geometry, faceCount) {
       ))
     }
     const faces = []
-    for (let i = 0; i < index.count; i += 3) {
-      faces.push([index.getX(i), index.getX(i + 1), index.getX(i + 2)])
+    if (geometry.index) {
+      const index = geometry.index
+      for (let i = 0; i < index.count; i += 3) {
+        faces.push([index.getX(i), index.getX(i + 1), index.getX(i + 2)])
+      }
+    } else {
+      for (let i = 0; i < position.count; i += 3) {
+        faces.push([i, i + 1, i + 2])
+      }
     }
     return new CANNON.ConvexPolyhedron({ vertices, faces })
   }
