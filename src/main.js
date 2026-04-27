@@ -396,27 +396,9 @@ function createPhysicsShape(geometry, faceCount) {
     )
     return new CANNON.Box(halfSize)
   } else {
-    const position = geometry.attributes.position
-    const vertices = []
-    for (let i = 0; i < position.count; i++) {
-      vertices.push(new CANNON.Vec3(
-        position.getX(i),
-        position.getY(i),
-        position.getZ(i)
-      ))
-    }
-    const faces = []
-    if (geometry.index) {
-      const index = geometry.index
-      for (let i = 0; i < index.count; i += 3) {
-        faces.push([index.getX(i), index.getX(i + 1), index.getX(i + 2)])
-      }
-    } else {
-      for (let i = 0; i < position.count; i += 3) {
-        faces.push([i, i + 1, i + 2])
-      }
-    }
-    return new CANNON.ConvexPolyhedron({ vertices, faces })
+    geometry.computeBoundingSphere()
+    const radius = geometry.boundingSphere?.radius || 1
+    return new CANNON.Sphere(radius * 0.92)
   }
 }
 
@@ -448,7 +430,7 @@ function resetDiePhysics(dieData) {
   body.angularVelocity.set(0, 0, 0)
   body.position.set(
     dieData.mesh.position.x,
-    1.5 + Math.random() * 0.6,
+    2.2 + Math.random() * 0.8,
     dieData.mesh.position.z
   )
   body.quaternion.set(
@@ -462,12 +444,12 @@ function resetDiePhysics(dieData) {
 }
 
 function applyDieImpulse(body) {
-  const impulse = new CANNON.Vec3((Math.random() - 0.5) * 3, 10 + Math.random() * 5, (Math.random() - 0.5) * 3)
+  const impulse = new CANNON.Vec3((Math.random() - 0.5) * 4, 12 + Math.random() * 4, (Math.random() - 0.5) * 4)
   body.applyImpulse(impulse, new CANNON.Vec3(0, 0, 0))
   body.angularVelocity.set(
-    (Math.random() - 0.5) * 12,
-    (Math.random() - 0.5) * 12,
-    (Math.random() - 0.5) * 12
+    (Math.random() - 0.5) * 14,
+    (Math.random() - 0.5) * 14,
+    (Math.random() - 0.5) * 14
   )
 }
 
@@ -515,22 +497,23 @@ function determineDieFaceValue(dieData) {
     return bestValue
   }
   const geometry = dieData.mesh.geometry
-  geometry.computeBoundingSphere()
-  const target = new THREE.Vector3(0, 1, 0)
-  const localUp = target.clone().applyQuaternion(dieData.mesh.quaternion.clone().invert())
   const position = geometry.attributes.position
-  let bestIndex = 0
-  let bestDot = -Infinity
+  const normals = []
   const normal = new THREE.Vector3()
   for (let i = 0; i < position.count; i += 1) {
     normal.fromBufferAttribute(position, i).normalize()
-    const dot = normal.dot(localUp)
+    normals.push(normal.clone().applyQuaternion(dieData.mesh.quaternion))
+  }
+  let bestValue = 1
+  let bestDot = -Infinity
+  for (let i = 0; i < Math.min(currentFaces, normals.length); i += 1) {
+    const dot = normals[i].dot(up)
     if (dot > bestDot) {
       bestDot = dot
-      bestIndex = i
+      bestValue = i + 1
     }
   }
-  return (bestIndex % currentFaces) + 1
+  return bestValue
 }
 
 function finalizeRollingDice() {
