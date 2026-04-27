@@ -138,6 +138,7 @@ const maxRolls = 3
 let scoreCumule = 0
 let scoreGain = 0
 let canFinishRound = false
+let roundFinalized = false
 
 function getKeepableDice() {
   const values = dice.map(d => d.value).filter(v => v != null)
@@ -407,6 +408,7 @@ function createDice(count) {
   currentRoll = 0
   rollInProgress = false
   canFinishRound = false
+  roundFinalized = false
   scoreGain = 0
   diceButtonsContainer.innerHTML = ''
 
@@ -529,14 +531,27 @@ function finalizeRollingDice() {
     })
     rollInProgress = false
     renderDiceButtons()
-
-    // Check for all kept at 3rd roll
-    if (currentRoll >= maxRolls && dice.every(d => d.kept)) {
-      scoreCumule += 10
-      showScoreAnimation('+10', null)
-      updateScoreDisplay()
-    }
   }, 500)
+}
+
+function finalizeRound() {
+  if (roundFinalized) return
+  roundFinalized = true
+  if (scoreGain > 0) {
+    scoreCumule += scoreGain
+    showScoreAnimation(`+${scoreGain}`, null, true)
+    scoreGain = 0
+    updateScoreDisplay()
+  }
+  if (dice.length > 0 && dice.every(d => d.kept)) {
+    scoreCumule += 10
+    showScoreAnimation('+10', null, true)
+    updateScoreDisplay()
+  }
+  if (scoreCumule >= 50) {
+    scoreCumule = 0
+    updateScoreDisplay()
+  }
 }
 
 function clampDieBounds(dieData) {
@@ -554,16 +569,7 @@ function clampDieBounds(dieData) {
 
 function rollDice() {
   if (canFinishRound) {
-    if (scoreGain > 0) {
-      scoreCumule += scoreGain
-      showScoreAnimation(`+${scoreGain}!`, null, true)
-      scoreGain = 0
-      updateScoreDisplay()
-    }
-    if (scoreCumule >= 50) {
-      scoreCumule = 0
-      updateScoreDisplay()
-    }
+    finalizeRound()
     canFinishRound = false
     createDice(Number(diceCountSelect.value))
     return
@@ -571,6 +577,7 @@ function rollDice() {
 
   if (currentRoll >= maxRolls) {
     canFinishRound = true
+    finalizeRound()
     updateRollUI()
     return
   }
