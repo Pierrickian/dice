@@ -104,8 +104,8 @@ world.allowSleep = true
 const diceMaterial = new CANNON.Material('dice')
 const floorMaterialBody = new CANNON.Material('floor')
 const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBody, {
-  friction: 0.25,
-  restitution: 0.4,
+  friction: 0.8,
+  restitution: 0.18,
 })
 world.defaultContactMaterial = contactMaterial
 
@@ -355,13 +355,13 @@ function createDie(x, z, index) {
     mass: 3,
     shape,
     position: new CANNON.Vec3(x, 0.5, z),
-    linearDamping: 0.05,
-    angularDamping: 0.05,
+    linearDamping: 0.35,
+    angularDamping: 0.45,
     material: diceMaterial,
   })
   body.allowSleep = true
-  body.sleepSpeedLimit = 0.05
-  body.sleepTimeLimit = 0.5
+  body.sleepSpeedLimit = 0.15
+  body.sleepTimeLimit = 0.25
   world.addBody(body)
 
   return {
