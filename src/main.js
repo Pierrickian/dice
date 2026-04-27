@@ -104,7 +104,7 @@ world.allowSleep = true
 const diceMaterial = new CANNON.Material('dice')
 const floorMaterialBody = new CANNON.Material('floor')
 const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBody, {
-  friction: 0.8,
+  friction: 1.1,
   restitution: 0.18,
 })
 world.defaultContactMaterial = contactMaterial
@@ -200,7 +200,7 @@ function getDieColor(index) {
 }
 
 function formatRollHeader() {
-  return `Lancer ${Math.min(currentRoll + 1, maxRolls)} / ${maxRolls}`
+  return `Lancer ${currentRoll} / ${maxRolls}`
 }
 
 function updateRollUI() {
@@ -355,8 +355,8 @@ function createDie(x, z, index) {
     mass: 3,
     shape,
     position: new CANNON.Vec3(x, 0.5, z),
-    linearDamping: 0.35,
-    angularDamping: 0.45,
+    linearDamping: 0.45,
+    angularDamping: 0.55,
     material: diceMaterial,
   })
   body.allowSleep = true
@@ -553,16 +553,13 @@ function clampDieBounds(dieData) {
 }
 
 function rollDice() {
-  // After 3rd roll, clicking canvas finishes the round
   if (canFinishRound) {
-    // Final score
     if (scoreGain > 0) {
       scoreCumule += scoreGain
       showScoreAnimation(`+${scoreGain}!`, null, true)
       scoreGain = 0
       updateScoreDisplay()
     }
-    // Reset global score if >= 50
     if (scoreCumule >= 50) {
       scoreCumule = 0
       updateScoreDisplay()
@@ -573,12 +570,11 @@ function rollDice() {
   }
 
   if (currentRoll >= maxRolls) {
-    // After 3rd roll, allow to keep more dice then finish
     canFinishRound = true
+    updateRollUI()
     return
   }
 
-  // Cumulate score
   if (scoreGain > 0) {
     scoreCumule += scoreGain
     showScoreAnimation(`+${scoreGain}`, null)
