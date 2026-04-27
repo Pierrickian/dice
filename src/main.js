@@ -139,6 +139,8 @@ let scoreCumule = 0
 let scoreGain = 0
 let canFinishRound = false
 let roundFinalized = false
+let roundBonusApplied = false
+let pendingRoundReset = false
 
 function getKeepableDice() {
   const values = dice.map(d => d.value).filter(v => v != null)
@@ -409,6 +411,8 @@ function createDice(count) {
   rollInProgress = false
   canFinishRound = false
   roundFinalized = false
+  roundBonusApplied = false
+  pendingRoundReset = false
   scoreGain = 0
   diceButtonsContainer.innerHTML = ''
 
@@ -537,20 +541,20 @@ function finalizeRollingDice() {
 function finalizeRound() {
   if (roundFinalized) return
   roundFinalized = true
-  if (scoreGain > 0) {
-    scoreCumule += scoreGain
-    showScoreAnimation(`+${scoreGain}`, null, true)
-    scoreGain = 0
+  const extra = currentRoll === 1 ? 2 : currentRoll === 2 ? 1 : 0
+  const total = scoreGain + extra
+  if (total > 0) {
+    scoreCumule += total
+    showScoreAnimation(`+${total}`, null, true)
     updateScoreDisplay()
   }
-  if (dice.length > 0 && dice.every(d => d.kept)) {
-    scoreCumule += 10
-    showScoreAnimation('+10', null, true)
-    updateScoreDisplay()
-  }
+  scoreGain = 0
   if (scoreCumule >= 50) {
     scoreCumule = 0
     updateScoreDisplay()
+  }
+  if (!roundBonusApplied) {
+    roundBonusApplied = true
   }
 }
 
@@ -568,15 +572,20 @@ function clampDieBounds(dieData) {
 }
 
 function rollDice() {
-  if (canFinishRound) {
-    finalizeRound()
-    canFinishRound = false
+  if (pendingRoundReset) {
+    pendingRoundReset = false
     createDice(Number(diceCountSelect.value))
     return
   }
 
-  if (currentRoll >= maxRolls) {
+  if (canFinishRound) {
     finalizeRound()
+    canFinishRound = false
+    pendingRoundReset = true
+    return
+  }
+
+  if (currentRoll >= maxRolls) {
     canFinishRound = true
     updateRollUI()
     return
