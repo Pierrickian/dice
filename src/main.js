@@ -491,14 +491,14 @@ function determineDieFaceValue(dieData) {
   const position = geometry.attributes.position
   const index = geometry.index
   let bestDot = -Infinity
-  let bestFace = 0
   const up = new THREE.Vector3(0, 1, 0)
   const a = new THREE.Vector3()
   const b = new THREE.Vector3()
   const c = new THREE.Vector3()
   const faceNormal = new THREE.Vector3()
   const worldNormal = new THREE.Vector3()
-  const trianglesPerFace = Math.max(1, index.count / 3 / currentFaces)
+  const faceCount = currentFaces
+  const trianglesPerFace = Math.max(1, Math.floor(index.count / 3 / faceCount))
 
   for (let face = 0; face < index.count; face += 3) {
     a.fromBufferAttribute(position, index.getX(face))
@@ -509,11 +509,36 @@ function determineDieFaceValue(dieData) {
     const dot = worldNormal.dot(up)
     if (dot > bestDot) {
       bestDot = dot
-      bestFace = Math.floor(face / 3 / trianglesPerFace)
     }
   }
 
-  return Math.min(currentFaces, Math.max(1, bestFace + 1))
+  if (faceCount === 6) {
+    const axes = [
+      { value: 1, normal: new THREE.Vector3(0, 1, 0) },
+      { value: 2, normal: new THREE.Vector3(0, 0, 1) },
+      { value: 3, normal: new THREE.Vector3(1, 0, 0) },
+      { value: 4, normal: new THREE.Vector3(-1, 0, 0) },
+      { value: 5, normal: new THREE.Vector3(0, 0, -1) },
+      { value: 6, normal: new THREE.Vector3(0, -1, 0) },
+    ]
+    let bestValue = 1
+    let bestScore = -Infinity
+    for (const entry of axes) {
+      const score = entry.normal.clone().applyQuaternion(dieData.mesh.quaternion).dot(up)
+      if (score > bestScore) {
+        bestScore = score
+        bestValue = entry.value
+      }
+    }
+    return bestValue
+  }
+
+  const faces = []
+  for (let face = 0; face < index.count; face += 3 * trianglesPerFace) {
+    faces.push(face)
+  }
+  const faceIndex = Math.min(faceCount - 1, Math.max(0, Math.round((faces.length - 1) * ((bestDot + 1) / 2))))
+  return faceIndex + 1
 }
 
 function finalizeRollingDice() {
