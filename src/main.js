@@ -254,12 +254,12 @@ function renderDiceButtons() {
     button.style.borderColor = `#${dieData.color.toString(16).padStart(6, '0')}`
     button.classList.toggle('kept', dieData.kept)
     button.classList.toggle('rolling', dieData.rolling)
-    if (!keepable.has(index) && !dieData.kept) {
+    if (!keepable.has(index) && !dieData.kept && currentRoll < maxRolls) {
       button.classList.add('disabled')
     }
 
     button.addEventListener('click', () => {
-      if (currentRoll === 0 || (currentRoll >= maxRolls && !canFinishRound) || dieData.rolling || (!keepable.has(index) && !dieData.kept)) return
+      if (currentRoll === 0 || dieData.rolling || (!keepable.has(index) && !dieData.kept && currentRoll < maxRolls)) return
       dieData.kept = !dieData.kept
       button.classList.toggle('kept', dieData.kept)
       dieData.mesh.visible = !dieData.kept
@@ -576,8 +576,8 @@ function rollDice() {
   }
 
   if (currentRoll >= maxRolls) {
-    canFinishRound = true
     finalizeRound()
+    canFinishRound = true
     updateRollUI()
     return
   }
@@ -603,6 +603,9 @@ function rollDice() {
   cameraZoomTimer = 0
   renderDiceButtons()
   updateRollUI()
+  if (currentRoll >= maxRolls) {
+    canFinishRound = true
+  }
 }
 
 diceCountSelect.addEventListener('change', (event) => {
