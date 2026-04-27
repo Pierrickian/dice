@@ -299,53 +299,13 @@ function createDieGeometry(faceCount) {
 }
 
 function createD10Geometry() {
-  const radius = 1
-  const midZ = 0.3
-  const topZ = 1.1
-  const vertices = []
-  const indices = []
-
-  vertices.push(0, 0, topZ)
-  vertices.push(0, 0, -topZ)
-
-  const ringCount = 5
-  for (let i = 0; i < ringCount; i += 1) {
-    const angle = (i * Math.PI * 2) / ringCount
-    vertices.push(
-      radius * Math.cos(angle),
-      radius * Math.sin(angle),
-      midZ
-    )
-  }
-  for (let i = 0; i < ringCount; i += 1) {
-    const angle = (i * Math.PI * 2) / ringCount + Math.PI / ringCount
-    vertices.push(
-      radius * Math.cos(angle),
-      radius * Math.sin(angle),
-      -midZ
-    )
-  }
-
-  for (let i = 0; i < ringCount; i += 1) {
-    const next = (i + 1) % ringCount
-    const topIndex = 0
-    const bottomIndex = 1
-    const upperA = 2 + i
-    const upperB = 2 + next
-    const lowerA = 2 + ringCount + i
-    const lowerB = 2 + ringCount + next
-
-    indices.push(topIndex, upperA, lowerA)
-    indices.push(topIndex, lowerA, upperB)
-    indices.push(bottomIndex, lowerA, upperA)
-    indices.push(bottomIndex, upperB, lowerA)
-  }
-
-  return new THREE.PolyhedronGeometry(vertices, indices, 1, 0)
+  return new THREE.DodecahedronGeometry(0.9, 0)
 }
 
 function createDie(x, z, index) {
   const geometry = createDieGeometry(currentFaces)
+  geometry.computeBoundingBox()
+  geometry.computeBoundingSphere()
   const color = getDieColor(index)
   const material = new THREE.MeshStandardMaterial({
     color,
@@ -446,22 +406,28 @@ function resetDiePhysics(dieData) {
   const body = dieData.body
   body.velocity.set(0, 0, 0)
   body.angularVelocity.set(0, 0, 0)
-  body.position.set(body.position.x, 1.5, body.position.z)
-  body.quaternion.set(0, 0, 0, 1)
+  body.position.set(
+    dieData.mesh.position.x,
+    1.5 + Math.random() * 0.6,
+    dieData.mesh.position.z
+  )
+  body.quaternion.set(
+    Math.random(),
+    Math.random(),
+    Math.random(),
+    Math.random()
+  )
+  body.quaternion.normalize()
   body.wakeUp()
 }
 
 function applyDieImpulse(body) {
-  const impulse = new CANNON.Vec3(
-    (Math.random() - 0.5) * 2,
-    8 + Math.random() * 4,
-    (Math.random() - 0.5) * 2
-  )
+  const impulse = new CANNON.Vec3((Math.random() - 0.5) * 3, 10 + Math.random() * 5, (Math.random() - 0.5) * 3)
   body.applyImpulse(impulse, new CANNON.Vec3(0, 0, 0))
   body.angularVelocity.set(
-    (Math.random() - 0.5) * 8,
-    (Math.random() - 0.5) * 8,
-    (Math.random() - 0.5) * 8
+    (Math.random() - 0.5) * 12,
+    (Math.random() - 0.5) * 12,
+    (Math.random() - 0.5) * 12
   )
 }
 
@@ -487,32 +453,8 @@ function areRollingDiceSleeping() {
 }
 
 function determineDieFaceValue(dieData) {
-  const geometry = dieData.mesh.geometry
-  const position = geometry.attributes.position
-  const index = geometry.index
-  let bestDot = -Infinity
   const up = new THREE.Vector3(0, 1, 0)
-  const a = new THREE.Vector3()
-  const b = new THREE.Vector3()
-  const c = new THREE.Vector3()
-  const faceNormal = new THREE.Vector3()
-  const worldNormal = new THREE.Vector3()
-  const faceCount = currentFaces
-  const trianglesPerFace = Math.max(1, Math.floor(index.count / 3 / faceCount))
-
-  for (let face = 0; face < index.count; face += 3) {
-    a.fromBufferAttribute(position, index.getX(face))
-    b.fromBufferAttribute(position, index.getX(face + 1))
-    c.fromBufferAttribute(position, index.getX(face + 2))
-    faceNormal.subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize()
-    worldNormal.copy(faceNormal).applyQuaternion(dieData.mesh.quaternion)
-    const dot = worldNormal.dot(up)
-    if (dot > bestDot) {
-      bestDot = dot
-    }
-  }
-
-  if (faceCount === 6) {
+  if (currentFaces === 6) {
     const axes = [
       { value: 1, normal: new THREE.Vector3(0, 1, 0) },
       { value: 2, normal: new THREE.Vector3(0, 0, 1) },
@@ -532,13 +474,23 @@ function determineDieFaceValue(dieData) {
     }
     return bestValue
   }
-
-  const faces = []
-  for (let face = 0; face < index.count; face += 3 * trianglesPerFace) {
-    faces.push(face)
+  const geometry = dieData.mesh.geometry
+  geometry.computeBoundingSphere()
+  const target = new THREE.Vector3(0, 1, 0)
+  const localUp = target.clone().applyQuaternion(dieData.mesh.quaternion.clone().invert())
+  const position = geometry.attributes.position
+  let bestIndex = 0
+  let bestDot = -Infinity
+  const normal = new THREE.Vector3()
+  for (let i = 0; i < position.count; i += 1) {
+    normal.fromBufferAttribute(position, i).normalize()
+    const dot = normal.dot(localUp)
+    if (dot > bestDot) {
+      bestDot = dot
+      bestIndex = i
+    }
   }
-  const faceIndex = Math.min(faceCount - 1, Math.max(0, Math.round((faces.length - 1) * ((bestDot + 1) / 2))))
-  return faceIndex + 1
+  return (bestIndex % currentFaces) + 1
 }
 
 function finalizeRollingDice() {
