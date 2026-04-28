@@ -1,6 +1,97 @@
 import './style.css'
 import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
+import RULES from './rules.json'
+
+// ─── Rules interpreter ────────────────────────────────────────────────────────
+
+const ROUND = RULES.game.round_structure
+const SCORING = RULES.game.scoring
+const MAX_ROLLS = ROUND.max_rolls_per_round
+const UNLOCK_ALL_ON_FINAL = ROUND.unlock_all_on_final_roll
+const SCORE_RESET_THRESHOLD = SCORING.score_reset.threshold
+const POINTS_PER_DIE = SCORING.per_die_banked.points
+
+function getEarlyBonus(rollsUsed) {
+  const entry = SCORING.early_finish_bonus.bonuses.find(b => b.rolls_used === rollsUsed)
+  return entry ? entry.bonus_points : 0
+}
+
+const conditionHandlers = {
+  highest_value(values, _params) {
+    if (values.length === 0) return []
+    const max = Math.max(...values)
+    return values.map((v, i) => v === max ? i : -1).filter(i => i !== -1)
+  },
+
+  n_of_a_kind(values, params) {
+    const countMap = {}
+    values.forEach((v, i) => {
+      if (v == null) return
+      if (!countMap[v]) countMap[v] = []
+      countMap[v].push(i)
+    })
+    const eligible = []
+    for (const [, indices] of Object.entries(countMap)) {
+      if (indices.length >= params.min_count) {
+        if (params.eligible_count === 'all') {
+          indices.forEach(i => eligible.push(i))
+        } else {
+          eligible.push(indices[0])
+        }
+      }
+    }
+    return eligible
+  },
+
+  pair_sum(values, params) {
+    const eligible = []
+    for (let i = 0; i < values.length; i++) {
+      for (let j = i + 1; j < values.length; j++) {
+        if (values[i] != null && values[j] != null && values[i] + values[j] === params.target_sum) {
+          if (params.eligible_count === 'all') {
+            eligible.push(i, j)
+          } else {
+            eligible.push(i)
+          }
+        }
+      }
+    }
+    return eligible
+  },
+
+  straight(values, params) {
+    const unique = [...new Set(values.filter(v => v != null))].sort((a, b) => a - b)
+    for (let i = 0; i <= unique.length - params.run_length; i++) {
+      let isRun = true
+      for (let k = 1; k < params.run_length; k++) {
+        if (unique[i + k] !== unique[i] + k) { isRun = false; break }
+      }
+      if (isRun) {
+        const runValues = unique.slice(i, i + params.run_length)
+        const idx = values.findIndex(v => runValues.includes(v))
+        if (idx !== -1) return [idx]
+      }
+    }
+    return []
+  },
+}
+
+function computeEligibleIndices(diceValues, currentRoll) {
+  if (UNLOCK_ALL_ON_FINAL && currentRoll >= MAX_ROLLS) {
+    return new Set(diceValues.map((_, i) => i))
+  }
+  const eligible = new Set()
+  for (const condition of RULES.game.banking_rules.conditions) {
+    const handler = conditionHandlers[condition.engine.type]
+    if (!handler) continue
+    const indices = handler(diceValues, condition.engine)
+    indices.forEach(i => eligible.add(i))
+  }
+  return eligible
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const app = document.querySelector('#app')
 app.innerHTML = `
@@ -134,7 +225,6 @@ let dice = []
 let rollInProgress = false
 let currentFaces = Number(diceFacesSelect.value)
 let currentRoll = 0
-const maxRolls = 3
 let scoreCumule = 0
 let scoreGain = 0
 let canFinishRound = false
@@ -143,51 +233,8 @@ let roundBonusApplied = false
 let pendingRoundReset = false
 
 function getKeepableDice() {
-  const values = dice.map(d => d.value).filter(v => v != null)
-  const countMap = {}
-  values.forEach(v => countMap[v] = (countMap[v] || 0) + 1)
-  const keepable = new Set()
-
-  // Max value
-  const maxVal = Math.max(...values)
-  dice.forEach((d, i) => { if (d.value === maxVal) keepable.add(i) })
-
-  // Doubles: one from each pair
-  Object.entries(countMap).forEach(([val, count]) => {
-    if (count >= 2) {
-      const indices = dice.map((d, i) => d.value === Number(val) ? i : -1).filter(i => i !== -1)
-      keepable.add(indices[0]) // keep one
-    }
-  })
-
-  // Sum 10 pairs: for dice 6, 4+6, 3+7 but since max 6, 4+6
-  const pairs = []
-  for (let i = 0; i < dice.length; i++) {
-    for (let j = i+1; j < dice.length; j++) {
-      if (dice[i].value + dice[j].value === 10) {
-        pairs.push([i, j])
-      }
-    }
-  }
-  pairs.forEach(([i, j]) => { keepable.add(i) }) // keep one from each pair
-
-  // Brelan: all three
-  Object.entries(countMap).forEach(([val, count]) => {
-    if (count >= 3) {
-      dice.forEach((d, i) => { if (d.value === Number(val)) keepable.add(i) })
-    }
-  })
-
-  // Suite: one from three consecutive
-  const sorted = [...new Set(values)].sort((a,b)=>a-b)
-  for (let i = 0; i < sorted.length - 2; i++) {
-    if (sorted[i+1] === sorted[i]+1 && sorted[i+2] === sorted[i]+2) {
-      const indices = dice.map((d, idx) => d.value === sorted[i] || d.value === sorted[i+1] || d.value === sorted[i+2] ? idx : -1).filter(idx => idx !== -1)
-      keepable.add(indices[0]) // keep one
-    }
-  }
-
-  return keepable
+  const values = dice.map(d => d.value)
+  return computeEligibleIndices(values, currentRoll)
 }
 
 function getDieColor(index) {
@@ -203,7 +250,7 @@ function getDieColor(index) {
 }
 
 function formatRollHeader() {
-  return `Lancer ${currentRoll} / ${maxRolls}`
+  return `Lancer ${currentRoll} / ${MAX_ROLLS}`
 }
 
 function updateRollUI() {
@@ -256,24 +303,24 @@ function renderDiceButtons() {
     button.style.borderColor = `#${dieData.color.toString(16).padStart(6, '0')}`
     button.classList.toggle('kept', dieData.kept)
     button.classList.toggle('rolling', dieData.rolling)
-    if (!keepable.has(index) && !dieData.kept && currentRoll < maxRolls) {
+    if (!keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS) {
       button.classList.add('disabled')
     }
 
     button.addEventListener('click', () => {
-      if (currentRoll === 0 || dieData.rolling || (!keepable.has(index) && !dieData.kept && currentRoll < maxRolls)) return
+      if (currentRoll === 0 || dieData.rolling || (!keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS)) return
       dieData.kept = !dieData.kept
       button.classList.toggle('kept', dieData.kept)
       dieData.mesh.visible = !dieData.kept
       if (dieData.kept) {
         dieData.body.type = CANNON.Body.STATIC
         // Animation and score
-        showScoreAnimation('+1', dieData)
-        scoreGain += 1
+        showScoreAnimation(`+${POINTS_PER_DIE}`, dieData)
+        scoreGain += POINTS_PER_DIE
       } else {
         dieData.body.type = CANNON.Body.DYNAMIC
         dieData.body.wakeUp()
-        scoreGain -= 1
+        scoreGain -= POINTS_PER_DIE
       }
       renderDiceButtons()
     })
@@ -541,21 +588,19 @@ function finalizeRollingDice() {
 function finalizeRound() {
   if (roundFinalized) return
   roundFinalized = true
-  const extra = currentRoll === 1 ? 2 : currentRoll === 2 ? 1 : 0
-  const total = scoreGain + extra
+  const bonus = getEarlyBonus(currentRoll)
+  const total = scoreGain + bonus
   if (total > 0) {
     scoreCumule += total
     showScoreAnimation(`+${total}`, null, true)
     updateScoreDisplay()
   }
   scoreGain = 0
-  if (scoreCumule >= 50) {
+  if (scoreCumule >= SCORE_RESET_THRESHOLD) {
     scoreCumule = 0
     updateScoreDisplay()
   }
-  if (!roundBonusApplied) {
-    roundBonusApplied = true
-  }
+  roundBonusApplied = true
 }
 
 function clampDieBounds(dieData) {
@@ -585,7 +630,7 @@ function rollDice() {
     return
   }
 
-  if (currentRoll >= maxRolls) {
+  if (currentRoll >= MAX_ROLLS) {
     canFinishRound = true
     updateRollUI()
     return
@@ -612,7 +657,7 @@ function rollDice() {
   cameraZoomTimer = 0
   renderDiceButtons()
   updateRollUI()
-  if (currentRoll >= maxRolls) {
+  if (currentRoll >= MAX_ROLLS) {
     canFinishRound = true
   }
 }

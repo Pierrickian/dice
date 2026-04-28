@@ -1,0 +1,161 @@
+{
+  "game": {
+    "name": "Dice Game",
+    "description": "Each round, the player rolls a set of dice up to 3 times. After each roll, they can bank (keep) certain dice based on the combinations they form. The goal is to accumulate points across multiple rounds.",
+
+    "configuration": {
+      "description": "Settings the player can change before or between rounds.",
+      "dice_count": {
+        "description": "How many dice are rolled each round.",
+        "allowed_values": [1, 2, 3, 4, 5, 6],
+        "default": 4
+      },
+      "dice_faces": {
+        "description": "The number of faces on each die. All dice in a round share the same face count.",
+        "allowed_values": [4, 6, 8, 10, 12, 20],
+        "default": 6
+      }
+    },
+
+    "round_structure": {
+      "description": "A round is made up of up to 3 rolls. The player clicks the 3D scene to trigger each roll.",
+      "max_rolls_per_round": 3,
+      "roll_counter_display": "Shows 'Lancer X / 3'. Starts at 0/3 before any roll, then 1/3, 2/3, 3/3.",
+      "unlock_all_on_final_roll": true,
+      "flow": [
+        {
+          "step": 1,
+          "label": "0/3 — Ready",
+          "description": "Dice are placed on the table. No roll has happened yet. The player clicks the scene to start the first roll."
+        },
+        {
+          "step": 2,
+          "label": "1/3 — First roll",
+          "description": "All dice are thrown. Once they settle, the player can bank eligible dice. Any banked dice are set aside and not thrown again. The player then clicks the scene to proceed."
+        },
+        {
+          "step": 3,
+          "label": "2/3 — Second roll",
+          "description": "All non-banked dice are thrown again. The player can bank more eligible dice, then click to proceed."
+        },
+        {
+          "step": 4,
+          "label": "3/3 — Third roll",
+          "description": "All non-banked dice are thrown a final time. The player can bank any eligible dice."
+        },
+        {
+          "step": 5,
+          "label": "End of round",
+          "description": "After the third roll (or after all dice are banked early), the player clicks the scene once more. The round score is calculated and displayed, then a new round begins."
+        }
+      ],
+      "early_finish": {
+        "description": "If the player banks ALL dice before the third roll, the round ends immediately.",
+        "trigger": "all_dice_banked",
+        "next_action": "The player clicks the scene to confirm and move to the next round."
+      }
+    },
+
+    "banking_rules": {
+      "description": "After each roll, only certain dice are eligible to be banked. A die must match at least one condition below. After the final roll, all dice become eligible regardless of combinations.",
+      "note_on_third_roll": "On the final roll (3/3), all dice become selectable — no combination is required.",
+      "conditions": [
+        {
+          "id": "highest_value",
+          "name": "Highest value",
+          "description": "Any die showing the highest face value among all rolled dice is eligible. If multiple dice share the highest value, all of them are eligible.",
+          "example": "Rolled: 3, 5, 2, 5. The two dice showing 5 are both eligible.",
+          "engine": {
+            "type": "highest_value"
+          }
+        },
+        {
+          "id": "pair",
+          "name": "Pair",
+          "description": "If two or more dice show the same value, one of them is eligible. This does not make all matching dice eligible — only one from the pair.",
+          "example": "Rolled: 4, 4, 2, 6. One of the two 4s is eligible.",
+          "engine": {
+            "type": "n_of_a_kind",
+            "min_count": 2,
+            "eligible_count": 1
+          }
+        },
+        {
+          "id": "sum_ten",
+          "name": "Sum of 10",
+          "description": "If any two dice add up to exactly 10, one die from that pair is eligible.",
+          "example": "Rolled: 3, 7, 1, 5. The 3 is eligible because 3 + 7 = 10.",
+          "engine": {
+            "type": "pair_sum",
+            "target_sum": 10,
+            "eligible_count": 1
+          }
+        },
+        {
+          "id": "three_of_a_kind",
+          "name": "Three of a kind (Brelan)",
+          "description": "If three or more dice show the same value, ALL of those matching dice are eligible.",
+          "example": "Rolled: 4, 4, 4, 2. All three 4s are eligible.",
+          "engine": {
+            "type": "n_of_a_kind",
+            "min_count": 3,
+            "eligible_count": "all"
+          }
+        },
+        {
+          "id": "straight",
+          "name": "Straight (Suite)",
+          "description": "If three dice show three consecutive numbers, one of those dice is eligible.",
+          "example": "Rolled: 2, 3, 4, 6. One die from the 2-3-4 straight is eligible.",
+          "engine": {
+            "type": "straight",
+            "run_length": 3,
+            "eligible_count": 1
+          }
+        }
+      ]
+    },
+
+    "scoring": {
+      "description": "Points are awarded during and at the end of each round.",
+      "per_die_banked": {
+        "description": "Each time the player banks a die, they gain +1 point. Un-banking a die removes that +1.",
+        "points": 1,
+        "animation_color": "yellow"
+      },
+      "intermediate_rolls": {
+        "description": "Points accumulated by banking dice between two rolls are added to the total score immediately when the next roll is triggered.",
+        "animation_color": "yellow"
+      },
+      "end_of_round_total": {
+        "description": "When the round ends, all remaining banked-but-not-yet-counted points are added to the total score in a single final pop.",
+        "animation_color": "purple"
+      },
+      "early_finish_bonus": {
+        "description": "A bonus is awarded if the player banks all dice before using all 3 rolls. Included in the final end-of-round total.",
+        "animation_color": "green",
+        "bonuses": [
+          {
+            "rolls_used": 1,
+            "bonus_points": 2,
+            "explanation": "Finished in just 1 roll — 2 rolls saved — gain +2 extra."
+          },
+          {
+            "rolls_used": 2,
+            "bonus_points": 1,
+            "explanation": "Finished in 2 rolls — 1 roll saved — gain +1 extra."
+          },
+          {
+            "rolls_used": 3,
+            "bonus_points": 0,
+            "explanation": "Used all 3 rolls — no early bonus."
+          }
+        ]
+      },
+      "score_reset": {
+        "description": "When the cumulative score reaches this threshold or above, it resets back to 0. The game continues indefinitely.",
+        "threshold": 50
+      }
+    }
+  }
+}
