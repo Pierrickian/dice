@@ -8,7 +8,6 @@ import RULES from './rules.json'
 const ROUND = RULES.game.round_structure
 const SCORING = RULES.game.scoring
 const MAX_ROLLS = ROUND.max_rolls_per_round
-const UNLOCK_ALL_ON_FINAL = ROUND.unlock_all_on_final_roll
 const SCORE_RESET_THRESHOLD = SCORING.score_reset.threshold
 const POINTS_PER_DIE = SCORING.per_die_banked.points
 
@@ -77,10 +76,7 @@ const conditionHandlers = {
   },
 }
 
-function computeEligibleIndices(diceValues, currentRoll) {
-  if (UNLOCK_ALL_ON_FINAL && currentRoll >= MAX_ROLLS) {
-    return new Set(diceValues.map((_, i) => i))
-  }
+function computeEligibleIndices(diceValues) {
   const eligible = new Set()
   for (const condition of RULES.game.banking_rules.conditions) {
     const handler = conditionHandlers[condition.engine.type]
@@ -234,7 +230,7 @@ let pendingRoundReset = false
 
 function getKeepableDice() {
   const values = dice.map(d => d.value)
-  return computeEligibleIndices(values, currentRoll)
+  return computeEligibleIndices(values)
 }
 
 function getDieColor(index) {

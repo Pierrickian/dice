@@ -55,7 +55,6 @@ Configured as a static site deployment:
 | Mechanic | JSON path |
 |---|---|
 | Max rolls per round | `game.round_structure.max_rolls_per_round` |
-| Unlock all dice on final roll | `game.round_structure.unlock_all_on_final_roll` |
 | Dice count options & default | `game.configuration.dice_count` |
 | Dice faces options & default | `game.configuration.dice_faces` |
 | Banking eligibility conditions | `game.banking_rules.conditions[]` |
