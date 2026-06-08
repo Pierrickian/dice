@@ -557,15 +557,15 @@ function getPolyBevelFactor(faceCount) {
     case 4:
       return 0.1
     case 8:
-      return 0.065
+      return 0.025
     case 10:
-      return 0.052
+      return 0.018
     case 12:
-      return 0.045
+      return 0.014
     case 20:
-      return 0.032
+      return 0.008
     default:
-      return 0.05
+      return 0.012
   }
 }
 
