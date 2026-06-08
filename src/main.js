@@ -126,13 +126,13 @@ app.innerHTML = `
     <div id="tuning-panel">
       <div id="friction-control">
         <label for="friction-slider">Sol</label>
-        <input id="friction-slider" type="range" min="0.4" max="2.4" step="0.05" value="1.25">
-        <output id="friction-value" for="friction-slider">1.25</output>
+        <input id="friction-slider" type="range" min="0.02" max="0.8" step="0.02" value="0.18">
+        <output id="friction-value" for="friction-slider">0.18</output>
       </div>
       <div id="dice-friction-control">
         <label for="dice-friction-slider">Dés</label>
-        <input id="dice-friction-slider" type="range" min="0.1" max="2.4" step="0.05" value="0.8">
-        <output id="dice-friction-value" for="dice-friction-slider">0.80</output>
+        <input id="dice-friction-slider" type="range" min="0.01" max="0.7" step="0.01" value="0.12">
+        <output id="dice-friction-value" for="dice-friction-slider">0.12</output>
       </div>
       <div id="mass-control">
         <label for="mass-slider">Masse</label>
@@ -234,7 +234,7 @@ world.solver.tolerance = 0.001
 const diceMaterial = new CANNON.Material('dice')
 const floorMaterialBody = new CANNON.Material('floor')
 const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBody, {
-  friction: 1.25,
+  friction: 0.18,
   restitution: 0.02,
   contactEquationStiffness: 1e7,
   contactEquationRelaxation: 4,
@@ -242,7 +242,7 @@ const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBo
   frictionEquationRelaxation: 4,
 })
 const diceContactMaterial = new CANNON.ContactMaterial(diceMaterial, diceMaterial, {
-  friction: 0.8,
+  friction: 0.12,
   restitution: 0.02,
   contactEquationStiffness: 1e7,
   contactEquationRelaxation: 4,
@@ -251,14 +251,14 @@ const diceContactMaterial = new CANNON.ContactMaterial(diceMaterial, diceMateria
 })
 world.addContactMaterial(contactMaterial)
 world.addContactMaterial(diceContactMaterial)
-world.defaultContactMaterial.friction = 1.0
+world.defaultContactMaterial.friction = 0.14
 world.defaultContactMaterial.restitution = 0.02
 const MIN_SIMULATED_DIE_MASS_KG = 0.0005
 let dieMassKg = Number(massSlider.value) / 1000
 
 function setGroundFriction(value) {
   contactMaterial.friction = value
-  world.defaultContactMaterial.friction = Math.max(0.1, value * 0.8)
+  world.defaultContactMaterial.friction = Math.max(0.01, value * 0.75)
   frictionValue.textContent = value.toFixed(2)
 }
 
