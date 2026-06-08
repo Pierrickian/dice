@@ -551,7 +551,7 @@ function createPolyDieGeometry(definition, faceCount) {
 
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
-  applySoftVisualNormals(geometry)
+  geometry.computeVertexNormals()
   geometry.userData.polyDefinition = definition
   geometry.userData.physicsDefinition = physicsDefinition
   geometry.userData.faceNormals = definition.faceNormals.map((normal, index) => ({
@@ -708,17 +708,6 @@ function createBeveledBoxDefinition(halfSize, bevelRadius) {
     vertices,
     faces: orientFacesOutward(vertices, faces),
   }
-}
-
-function applySoftVisualNormals(geometry) {
-  const position = geometry.getAttribute('position')
-  const normals = []
-  const normal = new THREE.Vector3()
-  for (let i = 0; i < position.count; i += 1) {
-    normal.fromBufferAttribute(position, i).normalize()
-    normals.push(normal.x, normal.y, normal.z)
-  }
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
 }
 
 function buildPolyDieDefinition(vertices, faces) {
