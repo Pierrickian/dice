@@ -712,6 +712,7 @@ function createDie(x, z, index) {
     value: null,
     rolling: false,
     kept: false,
+    aimOrientationLocked: false,
     index,
   }
 }
@@ -806,13 +807,16 @@ function placeDieForAiming(dieData, center, clusterIndex, activeCount, suspended
     FLOOR_Y + (suspended ? AIM_SUSPEND_HEIGHT : 0.82) + (suspended ? 0 : Math.random() * 0.12),
     center.z + offset.z
   )
-  body.quaternion.set(
-    Math.random(),
-    Math.random(),
-    Math.random(),
-    Math.random()
-  )
-  body.quaternion.normalize()
+  if (!suspended || !dieData.aimOrientationLocked) {
+    body.quaternion.set(
+      Math.random(),
+      Math.random(),
+      Math.random(),
+      Math.random()
+    )
+    body.quaternion.normalize()
+    dieData.aimOrientationLocked = suspended
+  }
   body.type = suspended ? CANNON.Body.STATIC : CANNON.Body.DYNAMIC
   body.collisionResponse = !suspended
   body.wakeUp()
@@ -833,6 +837,7 @@ function placeRollableDice(center, suspended = false) {
 function releaseAimedDice() {
   const activeDice = getRollableDice()
   activeDice.forEach((dieData) => {
+    dieData.aimOrientationLocked = false
     dieData.body.type = CANNON.Body.DYNAMIC
     dieData.body.collisionResponse = true
     dieData.body.wakeUp()
