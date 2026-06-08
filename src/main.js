@@ -154,12 +154,13 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   1000
 )
-const CAMERA_DEFAULT_POSITION = new THREE.Vector3(0, 4, 8)
+const CAMERA_DEFAULT_POSITION = new THREE.Vector3(0, 5.4, 7.3)
 const CAMERA_DEFAULT_TARGET = new THREE.Vector3(0, 0, 0)
 camera.position.copy(CAMERA_DEFAULT_POSITION)
 camera.lookAt(CAMERA_DEFAULT_TARGET)
 const cameraTarget = CAMERA_DEFAULT_TARGET.clone()
 const cameraOffset = CAMERA_DEFAULT_POSITION.clone().sub(CAMERA_DEFAULT_TARGET)
+const CAMERA_SCREEN_LOWER_TARGET_OFFSET = 0.75
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -198,15 +199,15 @@ world.solver.tolerance = 0.001
 const diceMaterial = new CANNON.Material('dice')
 const floorMaterialBody = new CANNON.Material('floor')
 const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBody, {
-  friction: 1.45,
+  friction: 2.25,
   restitution: 0.02,
   contactEquationStiffness: 1e7,
   contactEquationRelaxation: 4,
   frictionEquationStiffness: 1e7,
-  frictionEquationRelaxation: 4,
+  frictionEquationRelaxation: 3,
 })
 world.addContactMaterial(contactMaterial)
-world.defaultContactMaterial.friction = 1.2
+world.defaultContactMaterial.friction = 1.8
 world.defaultContactMaterial.restitution = 0.02
 
 const floorBody = new CANNON.Body({
@@ -233,6 +234,7 @@ const FACE_SETTLE_DOT = 0.86
 const REALISTIC_DIE_MASS_KG = 0.006
 const CAMERA_FALLBACK_RADIUS = 1.4
 const CAMERA_MARGIN = 1.12
+const HAND_THROW_START_X = -2.75
 
 let dice = []
 let rollInProgress = false
@@ -641,8 +643,8 @@ function createDie(x, z, index) {
     mass: REALISTIC_DIE_MASS_KG,
     shape,
     position: new CANNON.Vec3(startPosition.x, startPosition.y, startPosition.z),
-    linearDamping: 0.58,
-    angularDamping: 0.78,
+    linearDamping: 0.68,
+    angularDamping: 0.84,
     material: diceMaterial,
   })
   body.quaternion.set(startQuaternion.x, startQuaternion.y, startQuaternion.z, startQuaternion.w)
@@ -731,10 +733,11 @@ function resetDiePhysics(dieData) {
   const body = dieData.body
   body.velocity.set(0, 0, 0)
   body.angularVelocity.set(0, 0, 0)
+  const centeredIndex = dieData.index - (dice.length - 1) / 2
   body.position.set(
-    dieData.mesh.position.x,
-    FLOOR_Y + 0.95 + Math.random() * 0.2,
-    dieData.mesh.position.z
+    HAND_THROW_START_X + Math.random() * 0.28,
+    FLOOR_Y + 0.82 + Math.random() * 0.12,
+    centeredIndex * 0.48 + (Math.random() - 0.5) * 0.18
   )
   body.quaternion.set(
     Math.random(),
@@ -746,22 +749,24 @@ function resetDiePhysics(dieData) {
   body.wakeUp()
 }
 
-function applyDieImpulse(body) {
+function applyDieImpulse(dieData) {
+  const body = dieData.body
+  const centeredIndex = dieData.index - (dice.length - 1) / 2
   const impulse = new CANNON.Vec3(
-    (Math.random() - 0.5) * 0.024,
+    0.026 + Math.random() * 0.01,
     0,
-    (Math.random() - 0.5) * 0.024
+    -centeredIndex * 0.002 + (Math.random() - 0.5) * 0.01
   )
   const offCenter = new CANNON.Vec3(
     (Math.random() - 0.5) * 0.45,
-    (Math.random() - 0.5) * 0.25,
+    (Math.random() - 0.5) * 0.18,
     (Math.random() - 0.5) * 0.45
   )
   body.applyImpulse(impulse, offCenter)
   body.angularVelocity.set(
-    (Math.random() - 0.5) * 10,
-    (Math.random() - 0.5) * 10,
-    (Math.random() - 0.5) * 10
+    (Math.random() - 0.5) * 8,
+    (Math.random() - 0.5) * 7,
+    -7 + Math.random() * 3
   )
 }
 
@@ -936,7 +941,7 @@ function rollDice() {
       dieData.value = null
       dieData.rolling = true
       resetDiePhysics(dieData)
-      applyDieImpulse(dieData.body)
+      applyDieImpulse(dieData)
     }
   }
 
@@ -979,7 +984,8 @@ function animate() {
 
 function updateCameraFrame(delta) {
   const bounds = getVisibleDiceBounds()
-  const desiredTarget = bounds.center
+  const desiredTarget = bounds.center.clone()
+  desiredTarget.y += CAMERA_SCREEN_LOWER_TARGET_OFFSET
   const desiredDistance = Math.max(
     cameraOffset.length(),
     getCameraDistanceForRadius(bounds.radius)
