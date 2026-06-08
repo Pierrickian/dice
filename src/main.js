@@ -351,6 +351,7 @@ const timeStep = 1 / 60
 const FACE_SETTLE_DOT = 0.82
 const CAMERA_FALLBACK_RADIUS = 1.4
 const CAMERA_MARGIN = 1.12
+const CAMERA_PAN_MAX_FACTOR = 0.75
 const D6_CLUSTER_SPACING = 1.18
 const POLY_DICE_CLUSTER_SPACING = 2.15
 const MAX_DRAG_DISTANCE = 2.8
@@ -565,15 +566,15 @@ function getPolyBevelFactor(faceCount) {
     case 4:
       return 0.1
     case 8:
-      return 0.025
-    case 10:
-      return 0.018
-    case 12:
-      return 0.014
-    case 20:
-      return 0.008
-    default:
       return 0.012
+    case 10:
+      return 0.008
+    case 12:
+      return 0.006
+    case 20:
+      return 0.0035
+    default:
+      return 0.006
   }
 }
 
@@ -1283,6 +1284,13 @@ function getPinchDistance() {
 
 function getCameraFrame() {
   const bounds = getVisibleDiceBounds()
+  const maxPanOffset = Math.max(0.5, bounds.radius * CAMERA_PAN_MAX_FACTOR)
+  const horizontalPanLength = Math.hypot(cameraPanOffset.x, cameraPanOffset.z)
+  if (horizontalPanLength > maxPanOffset) {
+    const factor = maxPanOffset / horizontalPanLength
+    cameraPanOffset.x *= factor
+    cameraPanOffset.z *= factor
+  }
   const target = bounds.center.clone().add(cameraPanOffset)
   target.y += CAMERA_SCREEN_LOWER_TARGET_OFFSET
   const distance = Math.max(
@@ -1296,6 +1304,9 @@ function getCameraFrame() {
 }
 
 function applyCameraFrame(delta, snap = false) {
+  if (!snap && !pinchInProgress) {
+    cameraPanOffset.lerp(new THREE.Vector3(0, 0, 0), 1 - Math.exp(-delta * 0.9))
+  }
   const frame = getCameraFrame()
   const smoothing = snap ? 1 : 1 - Math.exp(-delta * 5.5)
   cameraTarget.lerp(frame.target, smoothing)
@@ -1324,8 +1335,8 @@ function updatePinchZoom() {
   const nextDistance = getPinchDistance()
   cameraZoomScale = THREE.MathUtils.clamp(
     pinchStartZoomScale * (pinchStartDistance / Math.max(1, nextDistance)),
-    0.45,
-    3.2
+    0.25,
+    5.0
   )
   applyCameraFrame(0, true)
 
