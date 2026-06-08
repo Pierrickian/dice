@@ -521,7 +521,7 @@ function createDieGeometry(faceCount) {
   switch (faceCount) {
     case 6: {
       const geometry = new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
-      geometry.userData.physicsDefinition = createConvexDefinitionFromGeometry(geometry)
+      geometry.userData.physicsDefinition = createBeveledBoxDefinition(0.5, 0.08)
       return geometry
     }
     default:
@@ -642,19 +642,14 @@ function createBeveledPolyDieDefinition(definition, faceCount) {
   }
 }
 
-function createConvexDefinitionFromGeometry(geometry) {
-  const source = geometry.index ? geometry : geometry.toNonIndexed()
-  const position = source.getAttribute('position')
-  const index = source.index
+function createBeveledBoxDefinition(halfSize, bevelRadius) {
+  const inset = halfSize - bevelRadius
   const vertices = []
   const vertexMap = new Map()
   const faces = []
 
-  function getVertexIndex(attributeIndex) {
-    const x = position.getX(attributeIndex)
-    const y = position.getY(attributeIndex)
-    const z = position.getZ(attributeIndex)
-    const key = `${x.toFixed(5)}:${y.toFixed(5)}:${z.toFixed(5)}`
+  function addVertex(x, y, z) {
+    const key = `${x}:${y}:${z}`
     if (!vertexMap.has(key)) {
       vertexMap.set(key, vertices.length)
       vertices.push([x, y, z])
@@ -662,14 +657,42 @@ function createConvexDefinitionFromGeometry(geometry) {
     return vertexMap.get(key)
   }
 
-  const count = index ? index.count : position.count
-  for (let i = 0; i < count; i += 3) {
-    const face = [
-      getVertexIndex(index ? index.getX(i) : i),
-      getVertexIndex(index ? index.getX(i + 1) : i + 1),
-      getVertexIndex(index ? index.getX(i + 2) : i + 2),
-    ]
-    if (new Set(face).size === 3) faces.push(face)
+  function addFace(points) {
+    faces.push(points.map(([x, y, z]) => addVertex(x, y, z)))
+  }
+
+  const h = halfSize
+  const s = inset
+  const signs = [-1, 1]
+
+  addFace([[h, -s, -s], [h, s, -s], [h, s, s], [h, -s, s]])
+  addFace([[-h, -s, s], [-h, s, s], [-h, s, -s], [-h, -s, -s]])
+  addFace([[-s, h, -s], [-s, h, s], [s, h, s], [s, h, -s]])
+  addFace([[-s, -h, s], [-s, -h, -s], [s, -h, -s], [s, -h, s]])
+  addFace([[-s, -s, h], [s, -s, h], [s, s, h], [-s, s, h]])
+  addFace([[-s, s, -h], [s, s, -h], [s, -s, -h], [-s, -s, -h]])
+
+  for (const y of signs) {
+    for (const z of signs) {
+      addFace([[-s, y * h, z * s], [s, y * h, z * s], [s, y * s, z * h], [-s, y * s, z * h]])
+    }
+  }
+  for (const x of signs) {
+    for (const z of signs) {
+      addFace([[x * h, -s, z * s], [x * h, s, z * s], [x * s, s, z * h], [x * s, -s, z * h]])
+    }
+  }
+  for (const x of signs) {
+    for (const y of signs) {
+      addFace([[x * h, y * s, -s], [x * h, y * s, s], [x * s, y * h, s], [x * s, y * h, -s]])
+    }
+  }
+  for (const x of signs) {
+    for (const y of signs) {
+      for (const z of signs) {
+        addFace([[x * h, y * s, z * s], [x * s, y * h, z * s], [x * s, y * s, z * h]])
+      }
+    }
   }
 
   return {
