@@ -1,6 +1,7 @@
 import './style.css'
 import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import RULES from './rules.json'
 
 // ─── Rules interpreter ────────────────────────────────────────────────────────
@@ -139,6 +140,16 @@ app.innerHTML = `
         <input id="mass-slider" type="range" min="0" max="10" step="0.5" value="6">
         <output id="mass-value" for="mass-slider">6.0 g</output>
       </div>
+      <div id="throw-force-control">
+        <label for="throw-force-slider">Force</label>
+        <input id="throw-force-slider" type="range" min="0.02" max="0.45" step="0.01" value="0.20">
+        <output id="throw-force-value" for="throw-force-slider">0.20</output>
+      </div>
+      <div id="throw-angle-control">
+        <label for="throw-angle-slider">Altitude</label>
+        <input id="throw-angle-slider" type="range" min="-10" max="10" step="1" value="0">
+        <output id="throw-angle-value" for="throw-angle-slider">0°</output>
+      </div>
     </div>
     <div id="roll-panel">
       <div id="roll-header">Lancer 1 / 3</div>
@@ -173,6 +184,10 @@ const diceFrictionSlider = document.querySelector('#dice-friction-slider')
 const diceFrictionValue = document.querySelector('#dice-friction-value')
 const massSlider = document.querySelector('#mass-slider')
 const massValue = document.querySelector('#mass-value')
+const throwForceSlider = document.querySelector('#throw-force-slider')
+const throwForceValue = document.querySelector('#throw-force-value')
+const throwAngleSlider = document.querySelector('#throw-angle-slider')
+const throwAngleValue = document.querySelector('#throw-angle-value')
 const aimIndicator = document.querySelector('#aim-indicator')
 resetButton.style.display = 'none'
 
@@ -255,6 +270,10 @@ world.defaultContactMaterial.friction = 0.14
 world.defaultContactMaterial.restitution = 0.02
 const MIN_SIMULATED_DIE_MASS_KG = 0.0005
 let dieMassKg = Number(massSlider.value) / 1000
+const DEFAULT_FORCE_PER_KG = 0.2 / 0.006
+let throwForceImpulse = Number(throwForceSlider.value)
+let forceFollowsMass = true
+let throwAltitudeAngleDeg = Number(throwAngleSlider.value)
 
 function setGroundFriction(value) {
   contactMaterial.friction = value
@@ -278,11 +297,30 @@ function getSimulatedDieMassKg() {
 function setDieMass(grams) {
   dieMassKg = grams / 1000
   massValue.textContent = `${grams.toFixed(1)} g`
+  if (forceFollowsMass) {
+    setThrowForce(getDefaultThrowForceForMass(), false)
+  }
   dice.forEach((dieData) => {
     dieData.body.mass = getSimulatedDieMassKg()
     dieData.body.updateMassProperties()
     dieData.body.wakeUp()
   })
+}
+
+function getDefaultThrowForceForMass() {
+  return THREE.MathUtils.clamp(getSimulatedDieMassKg() * DEFAULT_FORCE_PER_KG, 0.02, 0.45)
+}
+
+function setThrowForce(value, manual = true) {
+  throwForceImpulse = value
+  throwForceSlider.value = value.toFixed(2)
+  throwForceValue.textContent = value.toFixed(2)
+  if (manual) forceFollowsMass = false
+}
+
+function setThrowAltitudeAngle(degrees) {
+  throwAltitudeAngleDeg = degrees
+  throwAngleValue.textContent = `${degrees}°`
 }
 
 const floorBody = new CANNON.Body({
@@ -310,7 +348,6 @@ const CAMERA_MARGIN = 1.12
 const D6_CLUSTER_SPACING = 1.18
 const POLY_DICE_CLUSTER_SPACING = 2.15
 const MAX_DRAG_DISTANCE = 2.8
-const MAX_THROW_IMPULSE = 0.2
 const AIM_SUSPEND_HEIGHT = 2.15
 
 let dice = []
@@ -329,6 +366,7 @@ let roundBonusApplied = false
 let pendingRoundReset = false
 
 setDieMass(Number(massSlider.value))
+setThrowAltitudeAngle(Number(throwAngleSlider.value))
 
 function getKeepableDice() {
   const values = dice.map(d => d.value)
@@ -482,9 +520,9 @@ function createDieGeometry(faceCount) {
 
   switch (faceCount) {
     case 6:
-      return new THREE.BoxGeometry(1, 1, 1)
+      return new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
     default:
-      return new THREE.BoxGeometry(1, 1, 1)
+      return new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
   }
 }
 
@@ -500,13 +538,24 @@ function createPolyDieGeometry(definition) {
 
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
-  geometry.computeVertexNormals()
+  applySoftVisualNormals(geometry)
   geometry.userData.polyDefinition = definition
   geometry.userData.faceNormals = definition.faceNormals.map((normal, index) => ({
     value: index + 1,
     normal,
   }))
   return geometry
+}
+
+function applySoftVisualNormals(geometry) {
+  const position = geometry.getAttribute('position')
+  const normals = []
+  const normal = new THREE.Vector3()
+  for (let i = 0; i < position.count; i += 1) {
+    normal.fromBufferAttribute(position, i).normalize()
+    normals.push(normal.x, normal.y, normal.z)
+  }
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
 }
 
 function buildPolyDieDefinition(vertices, faces) {
@@ -891,10 +940,13 @@ function applyDieImpulse(dieData, launchVector, forceRatio) {
   const body = dieData.body
   const centeredIndex = dieData.index - (dice.length - 1) / 2
   const sideScatter = -centeredIndex * 0.0015 + (Math.random() - 0.5) * 0.006
+  const altitudeRadians = THREE.MathUtils.degToRad(throwAltitudeAngleDeg)
+  const horizontalForce = throwForceImpulse * Math.cos(altitudeRadians) * forceRatio
+  const verticalForce = throwForceImpulse * Math.sin(altitudeRadians) * forceRatio
   const impulse = new CANNON.Vec3(
-    launchVector.x * MAX_THROW_IMPULSE * forceRatio,
-    0,
-    launchVector.z * MAX_THROW_IMPULSE * forceRatio + sideScatter
+    launchVector.x * horizontalForce,
+    verticalForce,
+    launchVector.z * horizontalForce + sideScatter
   )
   const offCenter = new CANNON.Vec3(
     (Math.random() - 0.5) * 0.45,
@@ -1204,6 +1256,14 @@ diceFrictionSlider.addEventListener('input', (event) => {
 
 massSlider.addEventListener('input', (event) => {
   setDieMass(Number(event.target.value))
+})
+
+throwForceSlider.addEventListener('input', (event) => {
+  setThrowForce(Number(event.target.value))
+})
+
+throwAngleSlider.addEventListener('input', (event) => {
+  setThrowAltitudeAngle(Number(event.target.value))
 })
 
 canvas.addEventListener('pointerdown', beginAim)

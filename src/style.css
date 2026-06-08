@@ -238,7 +238,9 @@ body,
 
 #friction-control,
 #dice-friction-control,
-#mass-control {
+#mass-control,
+#throw-force-control,
+#throw-angle-control {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px 10px;
@@ -251,14 +253,18 @@ body,
 
 #friction-control label,
 #dice-friction-control label,
-#mass-control label {
+#mass-control label,
+#throw-force-control label,
+#throw-angle-control label {
   font-size: 0.82rem;
   font-weight: 700;
 }
 
 #friction-control output,
 #dice-friction-control output,
-#mass-control output {
+#mass-control output,
+#throw-force-control output,
+#throw-angle-control output {
   min-width: 3.6ch;
   color: #ffd700;
   font-size: 0.82rem;
@@ -268,7 +274,9 @@ body,
 
 #friction-slider,
 #dice-friction-slider,
-#mass-slider {
+#mass-slider,
+#throw-force-slider,
+#throw-angle-slider {
   grid-column: 1 / -1;
   width: 100%;
   accent-color: #ffd700;
