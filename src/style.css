@@ -46,6 +46,34 @@ body,
   z-index: 4;
 }
 
+#tuning-button,
+#language-button {
+  position: absolute;
+  top: 16px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: rgba(18, 20, 34, 0.9);
+  border-radius: 14px;
+  color: white;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 4;
+}
+
+#tuning-button {
+  left: 70px;
+}
+
+#language-button {
+  right: 16px;
+}
+
 #menu-button span {
   display: block;
   width: 22px;
@@ -74,6 +102,27 @@ body,
   display: flex;
 }
 
+#tuning-panel {
+  position: absolute;
+  top: 70px;
+  left: 70px;
+  width: 240px;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(18, 20, 34, 0.99);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+  z-index: 3;
+}
+
+#tuning-panel.open {
+  display: flex;
+}
+
 .control-row {
   display: flex;
   flex-direction: column;
@@ -98,7 +147,7 @@ body,
 
 #roll-panel {
   position: absolute;
-  top: 16px;
+  top: 70px;
   right: 16px;
   width: min(260px, calc(100vw - 32px));
   display: flex;
@@ -188,7 +237,8 @@ body,
 }
 
 #friction-control,
-#dice-friction-control {
+#dice-friction-control,
+#mass-control {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px 10px;
@@ -200,13 +250,15 @@ body,
 }
 
 #friction-control label,
-#dice-friction-control label {
+#dice-friction-control label,
+#mass-control label {
   font-size: 0.82rem;
   font-weight: 700;
 }
 
 #friction-control output,
-#dice-friction-control output {
+#dice-friction-control output,
+#mass-control output {
   min-width: 3.6ch;
   color: #ffd700;
   font-size: 0.82rem;
@@ -215,7 +267,8 @@ body,
 }
 
 #friction-slider,
-#dice-friction-slider {
+#dice-friction-slider,
+#mass-slider {
   grid-column: 1 / -1;
   width: 100%;
   accent-color: #ffd700;

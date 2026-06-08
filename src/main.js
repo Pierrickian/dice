@@ -97,6 +97,8 @@ app.innerHTML = `
       <span></span>
       <span></span>
     </button>
+    <button id="tuning-button" type="button" aria-label="Réglages">⚙</button>
+    <button id="language-button" type="button" aria-label="Langue">FR</button>
     <div id="menu-panel" class="closed">
       <div class="control-row">
         <label for="dice-count">Nombre de dés</label>
@@ -121,9 +123,7 @@ app.innerHTML = `
         </select>
       </div>
     </div>
-    <div id="roll-panel">
-      <div id="roll-header">Lancer 1 / 3</div>
-      <div id="score-display">Score: 0</div>
+    <div id="tuning-panel">
       <div id="friction-control">
         <label for="friction-slider">Sol</label>
         <input id="friction-slider" type="range" min="0.4" max="2.4" step="0.05" value="1.25">
@@ -134,6 +134,15 @@ app.innerHTML = `
         <input id="dice-friction-slider" type="range" min="0.1" max="2.4" step="0.05" value="0.8">
         <output id="dice-friction-value" for="dice-friction-slider">0.80</output>
       </div>
+      <div id="mass-control">
+        <label for="mass-slider">Masse</label>
+        <input id="mass-slider" type="range" min="0" max="10" step="0.5" value="6">
+        <output id="mass-value" for="mass-slider">6.0 g</output>
+      </div>
+    </div>
+    <div id="roll-panel">
+      <div id="roll-header">Lancer 1 / 3</div>
+      <div id="score-display">Score: 0</div>
       <div id="dice-buttons" class="dice-buttons"></div>
       <div id="roll-controls">
         <button id="reset-button" type="button" class="secondary">Réinitialiser</button>
@@ -150,6 +159,9 @@ const diceCountSelect = document.querySelector('#dice-count')
 const diceFacesSelect = document.querySelector('#dice-faces')
 const menuButton = document.querySelector('#menu-button')
 const menuPanel = document.querySelector('#menu-panel')
+const tuningButton = document.querySelector('#tuning-button')
+const tuningPanel = document.querySelector('#tuning-panel')
+const languageButton = document.querySelector('#language-button')
 const rollHeader = document.querySelector('#roll-header')
 const diceButtonsContainer = document.querySelector('#dice-buttons')
 const resetButton = document.querySelector('#reset-button')
@@ -159,6 +171,8 @@ const frictionSlider = document.querySelector('#friction-slider')
 const frictionValue = document.querySelector('#friction-value')
 const diceFrictionSlider = document.querySelector('#dice-friction-slider')
 const diceFrictionValue = document.querySelector('#dice-friction-value')
+const massSlider = document.querySelector('#mass-slider')
+const massValue = document.querySelector('#mass-value')
 const aimIndicator = document.querySelector('#aim-indicator')
 resetButton.style.display = 'none'
 
@@ -239,6 +253,8 @@ world.addContactMaterial(contactMaterial)
 world.addContactMaterial(diceContactMaterial)
 world.defaultContactMaterial.friction = 1.0
 world.defaultContactMaterial.restitution = 0.02
+const MIN_SIMULATED_DIE_MASS_KG = 0.0005
+let dieMassKg = Number(massSlider.value) / 1000
 
 function setGroundFriction(value) {
   contactMaterial.friction = value
@@ -254,6 +270,20 @@ function setDiceFriction(value) {
 }
 
 setDiceFriction(Number(diceFrictionSlider.value))
+
+function getSimulatedDieMassKg() {
+  return Math.max(MIN_SIMULATED_DIE_MASS_KG, dieMassKg)
+}
+
+function setDieMass(grams) {
+  dieMassKg = grams / 1000
+  massValue.textContent = `${grams.toFixed(1)} g`
+  dice.forEach((dieData) => {
+    dieData.body.mass = getSimulatedDieMassKg()
+    dieData.body.updateMassProperties()
+    dieData.body.wakeUp()
+  })
+}
 
 const floorBody = new CANNON.Body({
   mass: 0,
@@ -275,13 +305,12 @@ const clock = {
 }
 const timeStep = 1 / 60
 const FACE_SETTLE_DOT = 0.82
-const REALISTIC_DIE_MASS_KG = 0.006
 const CAMERA_FALLBACK_RADIUS = 1.4
 const CAMERA_MARGIN = 1.12
 const D6_CLUSTER_SPACING = 1.18
 const POLY_DICE_CLUSTER_SPACING = 2.15
 const MAX_DRAG_DISTANCE = 2.8
-const MAX_THROW_IMPULSE = 0.3
+const MAX_THROW_IMPULSE = 0.2
 const AIM_SUSPEND_HEIGHT = 2.15
 
 let dice = []
@@ -298,6 +327,8 @@ let canFinishRound = false
 let roundFinalized = false
 let roundBonusApplied = false
 let pendingRoundReset = false
+
+setDieMass(Number(massSlider.value))
 
 function getKeepableDice() {
   const values = dice.map(d => d.value)
@@ -342,10 +373,20 @@ function updateScoreDisplay() {
 
 function toggleMenu() {
   menuPanel.classList.toggle('open')
+  tuningPanel.classList.remove('open')
 }
 
 function closeMenu() {
   menuPanel.classList.remove('open')
+}
+
+function toggleTuningMenu() {
+  tuningPanel.classList.toggle('open')
+  menuPanel.classList.remove('open')
+}
+
+function toggleLanguage() {
+  languageButton.textContent = languageButton.textContent === 'FR' ? 'EN' : 'FR'
 }
 
 function renderDiceButtons() {
@@ -692,7 +733,7 @@ function createDie(x, z, index) {
 
   const shape = createPhysicsShape(geometry, currentFaces)
   const body = new CANNON.Body({
-    mass: REALISTIC_DIE_MASS_KG,
+    mass: getSimulatedDieMassKg(),
     shape,
     position: new CANNON.Vec3(startPosition.x, startPosition.y, startPosition.z),
     linearDamping: 0.5,
@@ -838,8 +879,10 @@ function releaseAimedDice() {
   const activeDice = getRollableDice()
   activeDice.forEach((dieData) => {
     dieData.aimOrientationLocked = false
+    dieData.body.mass = getSimulatedDieMassKg()
     dieData.body.type = CANNON.Body.DYNAMIC
     dieData.body.collisionResponse = true
+    dieData.body.updateMassProperties()
     dieData.body.wakeUp()
   })
 }
@@ -860,9 +903,9 @@ function applyDieImpulse(dieData, launchVector, forceRatio) {
   )
   body.applyImpulse(impulse, offCenter)
   body.angularVelocity.set(
-    launchVector.z * 6 + (Math.random() - 0.5) * 3,
-    (Math.random() - 0.5) * 7,
-    -launchVector.x * 6 + (Math.random() - 0.5) * 3
+    launchVector.z * 3.8 + (Math.random() - 0.5) * 1.8,
+    (Math.random() - 0.5) * 3.2,
+    -launchVector.x * 3.8 + (Math.random() - 0.5) * 1.8
   )
 }
 
@@ -1159,11 +1202,17 @@ diceFrictionSlider.addEventListener('input', (event) => {
   setDiceFriction(Number(event.target.value))
 })
 
+massSlider.addEventListener('input', (event) => {
+  setDieMass(Number(event.target.value))
+})
+
 canvas.addEventListener('pointerdown', beginAim)
 canvas.addEventListener('pointermove', updateAim)
 canvas.addEventListener('pointerup', finishAim)
 canvas.addEventListener('pointercancel', cancelAim)
 menuButton.addEventListener('click', toggleMenu)
+tuningButton.addEventListener('click', toggleTuningMenu)
+languageButton.addEventListener('click', toggleLanguage)
 resetButton.addEventListener('click', () => createDice(Number(diceCountSelect.value)))
 
 function animate() {
