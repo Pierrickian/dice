@@ -187,7 +187,8 @@ body,
   font-weight: bold;
 }
 
-#friction-control {
+#friction-control,
+#dice-friction-control {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px 10px;
@@ -198,12 +199,14 @@ body,
   color: #e8e8f0;
 }
 
-#friction-control label {
+#friction-control label,
+#dice-friction-control label {
   font-size: 0.82rem;
   font-weight: 700;
 }
 
-#friction-control output {
+#friction-control output,
+#dice-friction-control output {
   min-width: 3.6ch;
   color: #ffd700;
   font-size: 0.82rem;
@@ -211,7 +214,8 @@ body,
   text-align: right;
 }
 
-#friction-slider {
+#friction-slider,
+#dice-friction-slider {
   grid-column: 1 / -1;
   width: 100%;
   accent-color: #ffd700;
