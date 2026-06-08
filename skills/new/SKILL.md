@@ -29,6 +29,13 @@ description: Exécuter automatiquement une séquence Git de démarrage de tâche
    - Lire `replit.md` à la racine
    - Appliquer ces règles pour toute la suite du travail
 
+8. Après avoir codé:
+   - vérifier le diff et lancer les tests/build pertinents
+   - créer un commit avec un message clair
+   - pousser la branche
+   - créer une pull request GitHub
+   - si une étape de validation, commit, push ou PR échoue, expliquer le blocage et donner la commande ou l'action exacte à reprendre
+
 # Sortie attendue
 
 - Donner un récapitulatif court:

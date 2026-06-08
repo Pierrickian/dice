@@ -156,6 +156,8 @@ const camera = new THREE.PerspectiveCamera(
 )
 camera.position.set(0, 4, 8)
 camera.lookAt(0, 0, 0)
+const cameraTarget = new THREE.Vector3(0, 0, 0)
+const cameraOffset = new THREE.Vector3(0, 4.2, 8.4)
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -186,16 +188,24 @@ floor.position.y = FLOOR_Y
 scene.add(floor)
 
 const world = new CANNON.World()
-world.gravity.set(0, -15, 0)
+world.gravity.set(0, -9.81, 0)
 world.allowSleep = true
+world.solver.iterations = 14
+world.solver.tolerance = 0.001
 
 const diceMaterial = new CANNON.Material('dice')
 const floorMaterialBody = new CANNON.Material('floor')
 const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBody, {
-  friction: 1.1,
-  restitution: 0.18,
+  friction: 1.45,
+  restitution: 0.08,
+  contactEquationStiffness: 1e7,
+  contactEquationRelaxation: 4,
+  frictionEquationStiffness: 1e7,
+  frictionEquationRelaxation: 4,
 })
-world.defaultContactMaterial = contactMaterial
+world.addContactMaterial(contactMaterial)
+world.defaultContactMaterial.friction = 1.2
+world.defaultContactMaterial.restitution = 0.06
 
 const floorBody = new CANNON.Body({
   mass: 0,
@@ -218,7 +228,9 @@ const clock = {
 const timeStep = 1 / 60
 const boundaryRadius = 4.5
 const FACE_SETTLE_DOT = 0.86
-let cameraZoomTimer = 0
+const REALISTIC_DIE_MASS_KG = 0.006
+const CAMERA_MIN_RADIUS = 2.9
+const CAMERA_MARGIN = 1.55
 
 let dice = []
 let rollInProgress = false
@@ -624,17 +636,17 @@ function createDie(x, z, index) {
 
   const shape = createPhysicsShape(geometry, currentFaces)
   const body = new CANNON.Body({
-    mass: 3,
+    mass: REALISTIC_DIE_MASS_KG,
     shape,
     position: new CANNON.Vec3(startPosition.x, startPosition.y, startPosition.z),
-    linearDamping: definition ? 0.32 : 0.45,
-    angularDamping: definition ? 0.22 : 0.55,
+    linearDamping: 0.58,
+    angularDamping: 0.78,
     material: diceMaterial,
   })
   body.quaternion.set(startQuaternion.x, startQuaternion.y, startQuaternion.z, startQuaternion.w)
-  body.allowSleep = !definition
-  body.sleepSpeedLimit = definition ? 0.035 : 0.15
-  body.sleepTimeLimit = definition ? 0.9 : 0.25
+  body.allowSleep = true
+  body.sleepSpeedLimit = 0.22
+  body.sleepTimeLimit = 0.22
   world.addBody(body)
 
   return {
@@ -719,7 +731,7 @@ function resetDiePhysics(dieData) {
   body.angularVelocity.set(0, 0, 0)
   body.position.set(
     dieData.mesh.position.x,
-    2.2 + Math.random() * 0.8,
+    FLOOR_Y + 1.45 + Math.random() * 0.35,
     dieData.mesh.position.z
   )
   body.quaternion.set(
@@ -733,12 +745,21 @@ function resetDiePhysics(dieData) {
 }
 
 function applyDieImpulse(body) {
-  const impulse = new CANNON.Vec3((Math.random() - 0.5) * 4, 12 + Math.random() * 4, (Math.random() - 0.5) * 4)
-  body.applyImpulse(impulse, new CANNON.Vec3(0, 0, 0))
+  const impulse = new CANNON.Vec3(
+    (Math.random() - 0.5) * 0.024,
+    0.018 + Math.random() * 0.012,
+    (Math.random() - 0.5) * 0.024
+  )
+  const offCenter = new CANNON.Vec3(
+    (Math.random() - 0.5) * 0.45,
+    (Math.random() - 0.5) * 0.25,
+    (Math.random() - 0.5) * 0.45
+  )
+  body.applyImpulse(impulse, offCenter)
   body.angularVelocity.set(
-    (Math.random() - 0.5) * 14,
-    (Math.random() - 0.5) * 14,
-    (Math.random() - 0.5) * 14
+    (Math.random() - 0.5) * 10,
+    (Math.random() - 0.5) * 10,
+    (Math.random() - 0.5) * 10
   )
 }
 
@@ -928,7 +949,6 @@ function rollDice() {
 
   currentRoll += 1
   rollInProgress = true
-  cameraZoomTimer = 0
   renderDiceButtons()
   updateRollUI()
   if (currentRoll >= MAX_ROLLS) {
@@ -959,23 +979,53 @@ function animate() {
   dice.forEach(clampDieBounds)
   syncPhysics()
   finalizeRollingDice()
-  animateCameraZoom(delta)
+  updateCameraFrame(delta)
 
   renderer.render(scene, camera)
 }
 
-function animateCameraZoom(delta) {
-  if (cameraZoomTimer >= 0.4) {
-    camera.position.set(0, 4, 8)
-    camera.lookAt(0, 0, 0)
-    return
+function updateCameraFrame(delta) {
+  const bounds = getVisibleDiceBounds()
+  const desiredTarget = bounds.center
+  const desiredDistance = getCameraDistanceForRadius(bounds.radius)
+  const desiredPosition = desiredTarget.clone().add(
+    cameraOffset.clone().normalize().multiplyScalar(desiredDistance)
+  )
+  const smoothing = 1 - Math.exp(-delta * 5.5)
+
+  cameraTarget.lerp(desiredTarget, smoothing)
+  camera.position.lerp(desiredPosition, smoothing)
+  camera.lookAt(cameraTarget)
+}
+
+function getVisibleDiceBounds() {
+  const visibleDice = dice.filter(dieData => !dieData.kept && dieData.mesh.visible)
+  if (visibleDice.length === 0) {
+    return {
+      center: new THREE.Vector3(0, FLOOR_Y + 0.5, 0),
+      radius: CAMERA_MIN_RADIUS,
+    }
   }
 
-  cameraZoomTimer += delta
-  const t = Math.min(1, cameraZoomTimer / 0.4)
-  const pulse = Math.sin(t * Math.PI)
-  camera.position.set(0, 4 + pulse * 0.4, 8 + pulse * 0.8)
-  camera.lookAt(0, 0, 0)
+  const box = new THREE.Box3()
+  for (const dieData of visibleDice) {
+    dieData.mesh.updateWorldMatrix(true, false)
+    box.expandByObject(dieData.mesh)
+  }
+
+  const center = box.getCenter(new THREE.Vector3())
+  const size = box.getSize(new THREE.Vector3())
+  const radius = Math.max(CAMERA_MIN_RADIUS, size.length() * 0.5 + 0.65)
+  center.y = Math.max(center.y, FLOOR_Y + 0.45)
+
+  return { center, radius }
+}
+
+function getCameraDistanceForRadius(radius) {
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov)
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect)
+  const limitingFov = Math.min(verticalFov, horizontalFov)
+  return Math.max(6, (radius * CAMERA_MARGIN) / Math.sin(limitingFov / 2))
 }
 
 createDice(Number(diceCountSelect.value))
