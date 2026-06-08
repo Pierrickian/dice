@@ -179,9 +179,10 @@ const floorMaterial = new THREE.MeshStandardMaterial({
   roughness: 0.9,
   metalness: 0.1,
 })
+const FLOOR_Y = -1.5
 const floor = new THREE.Mesh(floorGeometry, floorMaterial)
 floor.rotation.x = -Math.PI / 2
-floor.position.y = -1.5
+floor.position.y = FLOOR_Y
 scene.add(floor)
 
 const world = new CANNON.World()
@@ -198,10 +199,11 @@ world.defaultContactMaterial = contactMaterial
 
 const floorBody = new CANNON.Body({
   mass: 0,
-  shape: new CANNON.Box(new CANNON.Vec3(10, 0.1, 10)),
-  position: new CANNON.Vec3(0, -1.5, 0),
+  shape: new CANNON.Plane(),
+  position: new CANNON.Vec3(0, FLOOR_Y, 0),
   material: floorMaterialBody,
 })
+floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0)
 world.addBody(floorBody)
 
 const clock = {
@@ -215,6 +217,7 @@ const clock = {
 }
 const timeStep = 1 / 60
 const boundaryRadius = 4.5
+const FACE_SETTLE_DOT = 0.86
 let cameraZoomTimer = 0
 
 let dice = []
@@ -325,65 +328,281 @@ function renderDiceButtons() {
   })
 }
 
-function createDieGeometry(faceCount) {
+const D4_VERTICES = [
+  [1, 1, 1],
+  [-1, -1, 1],
+  [-1, 1, -1],
+  [1, -1, -1],
+].map(([x, y, z]) => [x / Math.sqrt(3), y / Math.sqrt(3), z / Math.sqrt(3)])
+
+const D4_FACES = [
+  [2, 3, 1],
+  [3, 2, 0],
+  [2, 1, 0],
+  [1, 3, 0],
+]
+const POLY_DICE_DEFINITIONS = new Map()
+
+function getPolyDieDefinition(faceCount) {
+  if (!POLY_DICE_DEFINITIONS.has(faceCount)) {
+    POLY_DICE_DEFINITIONS.set(faceCount, createPolyDieDefinition(faceCount))
+  }
+  return POLY_DICE_DEFINITIONS.get(faceCount)
+}
+
+function createPolyDieDefinition(faceCount) {
   switch (faceCount) {
     case 4:
-      return new THREE.TetrahedronGeometry(1)
+      return buildPolyDieDefinition(D4_VERTICES, D4_FACES)
+    case 8:
+      return createD8Definition()
+    case 10:
+      return createD10Definition()
+    case 12:
+      return createD12Definition()
+    case 20:
+      return createD20Definition()
+    default:
+      return null
+  }
+}
+
+function createDieGeometry(faceCount) {
+  const definition = getPolyDieDefinition(faceCount)
+  if (definition) return createPolyDieGeometry(definition)
+
+  switch (faceCount) {
     case 6:
       return new THREE.BoxGeometry(1, 1, 1)
-    case 8:
-      return new THREE.OctahedronGeometry(1)
-    case 10:
-      return createD10Geometry()
-    case 12:
-      return new THREE.DodecahedronGeometry(1)
-    case 20:
-      return new THREE.IcosahedronGeometry(1)
     default:
       return new THREE.BoxGeometry(1, 1, 1)
   }
 }
 
-function createD10Geometry() {
-  const radius = 1
-  const midZ = 0.3
-  const topZ = 1.1
+function createPolyDieGeometry(definition) {
   const vertices = []
-  const indices = []
+  for (const face of definition.faces) {
+    for (let i = 1; i < face.length - 1; i += 1) {
+      vertices.push(...definition.vertices[face[0]])
+      vertices.push(...definition.vertices[face[i]])
+      vertices.push(...definition.vertices[face[i + 1]])
+    }
+  }
 
-  vertices.push(0, 0, topZ)
-  vertices.push(0, 0, -topZ)
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
+  geometry.computeVertexNormals()
+  geometry.userData.polyDefinition = definition
+  geometry.userData.faceNormals = definition.faceNormals.map((normal, index) => ({
+    value: index + 1,
+    normal,
+  }))
+  return geometry
+}
+
+function buildPolyDieDefinition(vertices, faces) {
+  const centeredVertices = centerVertices(vertices)
+  const orientedFaces = orientFacesOutward(centeredVertices, faces)
+  const faceNormals = orientedFaces.map(face => getFaceNormalFromVertexList(centeredVertices, face))
+  const faceDistances = orientedFaces.map((face, index) => (
+    Math.abs(faceNormals[index].dot(new THREE.Vector3(...centeredVertices[face[0]])))
+  ))
+  return {
+    vertices: centeredVertices,
+    faces: orientedFaces,
+    faceNormals,
+    faceDistances,
+  }
+}
+
+function centerVertices(vertices) {
+  const center = vertices.reduce(
+    (sum, vertex) => [
+      sum[0] + vertex[0],
+      sum[1] + vertex[1],
+      sum[2] + vertex[2],
+    ],
+    [0, 0, 0]
+  ).map(value => value / vertices.length)
+
+  return vertices.map(vertex => [
+    vertex[0] - center[0],
+    vertex[1] - center[1],
+    vertex[2] - center[2],
+  ])
+}
+
+function orientFacesOutward(vertices, faces) {
+  return faces.map((face) => {
+    const normal = getFaceNormalFromVertexList(vertices, face)
+    const faceCenter = face.reduce(
+      (sum, index) => [
+        sum[0] + vertices[index][0],
+        sum[1] + vertices[index][1],
+        sum[2] + vertices[index][2],
+      ],
+      [0, 0, 0]
+    ).map(value => value / face.length)
+    return normal.dot(new THREE.Vector3(...faceCenter)) < 0 ? [...face].reverse() : [...face]
+  })
+}
+
+function getFaceNormalFromVertexList(vertices, face) {
+  const a = new THREE.Vector3(...vertices[face[0]])
+  const b = new THREE.Vector3(...vertices[face[1]])
+  const c = new THREE.Vector3(...vertices[face[2]])
+  return b.sub(a).cross(c.sub(a)).normalize()
+}
+
+function createD8Definition() {
+  return buildPolyDieDefinition(
+    [
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 1, 0],
+      [0, -1, 0],
+      [0, 0, 1],
+      [0, 0, -1],
+    ],
+    [
+      [0, 2, 4],
+      [4, 2, 1],
+      [1, 2, 5],
+      [5, 2, 0],
+      [4, 3, 0],
+      [1, 3, 4],
+      [5, 3, 1],
+      [0, 3, 5],
+    ]
+  )
+}
+
+function createD10Definition() {
+  const radius = 1
+  const topZ = 1.1
+  const midZ = topZ * 0.10557280900008409
+  const vertices = []
+  const faces = []
+
+  vertices.push([0, 0, topZ])
+  vertices.push([0, 0, -topZ])
 
   const ringCount = 5
   for (let i = 0; i < ringCount; i += 1) {
     const angle = (i * Math.PI * 2) / ringCount
-    vertices.push(radius * Math.cos(angle), radius * Math.sin(angle), midZ)
+    vertices.push([radius * Math.cos(angle), radius * Math.sin(angle), midZ])
   }
   for (let i = 0; i < ringCount; i += 1) {
     const angle = (i * Math.PI * 2) / ringCount + Math.PI / ringCount
-    vertices.push(radius * Math.cos(angle), radius * Math.sin(angle), -midZ)
+    vertices.push([radius * Math.cos(angle), radius * Math.sin(angle), -midZ])
   }
+
+  vertices[0] = [0, 0, topZ]
+  vertices[1] = [0, 0, -topZ]
 
   for (let i = 0; i < ringCount; i += 1) {
     const next = (i + 1) % ringCount
-    const topIndex = 0
-    const bottomIndex = 1
     const upperA = 2 + i
     const upperB = 2 + next
     const lowerA = 2 + ringCount + i
     const lowerB = 2 + ringCount + next
 
-    indices.push(topIndex, upperA, lowerA)
-    indices.push(topIndex, lowerA, upperB)
-    indices.push(bottomIndex, lowerA, upperA)
-    indices.push(bottomIndex, upperB, lowerA)
+    faces.push([0, upperA, lowerA, upperB])
+    faces.push([1, lowerA, upperB, lowerB])
   }
 
-  return new THREE.PolyhedronGeometry(vertices, indices, 1, 0)
+  return buildPolyDieDefinition(vertices, faces)
+}
+
+function createD20Definition() {
+  return buildPolyDieDefinition(createIcosahedronVertices(), createIcosahedronFaces())
+}
+
+function createD12Definition() {
+  const icosaVertices = createIcosahedronVertices()
+  const icosaFaces = orientFacesOutward(icosaVertices, createIcosahedronFaces())
+  const dodecaVertices = icosaFaces.map(face => {
+    const normal = getFaceNormalFromVertexList(icosaVertices, face)
+    return [normal.x, normal.y, normal.z]
+  })
+
+  const dodecaFaces = icosaVertices.map((vertex, vertexIndex) => {
+    const axis = new THREE.Vector3(...vertex).normalize()
+    const adjacent = []
+    icosaFaces.forEach((face, faceIndex) => {
+      if (face.includes(vertexIndex)) adjacent.push(faceIndex)
+    })
+
+    const reference = new THREE.Vector3(...dodecaVertices[adjacent[0]])
+      .projectOnPlane(axis)
+      .normalize()
+    const tangent = new THREE.Vector3().crossVectors(axis, reference).normalize()
+
+    return adjacent.sort((a, b) => {
+      const pa = new THREE.Vector3(...dodecaVertices[a]).projectOnPlane(axis).normalize()
+      const pb = new THREE.Vector3(...dodecaVertices[b]).projectOnPlane(axis).normalize()
+      const angleA = Math.atan2(pa.dot(tangent), pa.dot(reference))
+      const angleB = Math.atan2(pb.dot(tangent), pb.dot(reference))
+      return angleA - angleB
+    })
+  })
+
+  return buildPolyDieDefinition(dodecaVertices, dodecaFaces)
+}
+
+function createIcosahedronVertices() {
+  const phi = (1 + Math.sqrt(5)) / 2
+  return normalizeVertices([
+    [-1, phi, 0],
+    [1, phi, 0],
+    [-1, -phi, 0],
+    [1, -phi, 0],
+    [0, -1, phi],
+    [0, 1, phi],
+    [0, -1, -phi],
+    [0, 1, -phi],
+    [phi, 0, -1],
+    [phi, 0, 1],
+    [-phi, 0, -1],
+    [-phi, 0, 1],
+  ])
+}
+
+function createIcosahedronFaces() {
+  return [
+    [0, 11, 5],
+    [0, 5, 1],
+    [0, 1, 7],
+    [0, 7, 10],
+    [0, 10, 11],
+    [1, 5, 9],
+    [5, 11, 4],
+    [11, 10, 2],
+    [10, 7, 6],
+    [7, 1, 8],
+    [3, 9, 4],
+    [3, 4, 2],
+    [3, 2, 6],
+    [3, 6, 8],
+    [3, 8, 9],
+    [4, 9, 5],
+    [2, 4, 11],
+    [6, 2, 10],
+    [8, 6, 7],
+    [9, 8, 1],
+  ]
+}
+
+function normalizeVertices(vertices) {
+  return vertices.map(([x, y, z]) => {
+    const length = Math.sqrt(x * x + y * y + z * z) || 1
+    return [x / length, y / length, z / length]
+  })
 }
 
 function createDie(x, z, index) {
   const geometry = createDieGeometry(currentFaces)
+  const definition = geometry.userData.polyDefinition
   geometry.computeBoundingBox()
   geometry.computeBoundingSphere()
   const color = getDieColor(index)
@@ -393,21 +612,29 @@ function createDie(x, z, index) {
     metalness: 0.15,
   })
   const die = new THREE.Mesh(geometry, material)
-  die.position.set(x, 0.5, z)
+  const startPosition = new THREE.Vector3(x, 0.5, z)
+  const startQuaternion = new THREE.Quaternion()
+  if (definition) {
+    startPosition.y = FLOOR_Y + definition.faceDistances[0]
+    startQuaternion.copy(getFaceDownQuaternion(definition, 0))
+  }
+  die.position.copy(startPosition)
+  die.quaternion.copy(startQuaternion)
   scene.add(die)
 
   const shape = createPhysicsShape(geometry, currentFaces)
   const body = new CANNON.Body({
     mass: 3,
     shape,
-    position: new CANNON.Vec3(x, 0.5, z),
-    linearDamping: 0.45,
-    angularDamping: 0.55,
+    position: new CANNON.Vec3(startPosition.x, startPosition.y, startPosition.z),
+    linearDamping: definition ? 0.32 : 0.45,
+    angularDamping: definition ? 0.22 : 0.55,
     material: diceMaterial,
   })
-  body.allowSleep = true
-  body.sleepSpeedLimit = 0.15
-  body.sleepTimeLimit = 0.25
+  body.quaternion.set(startQuaternion.x, startQuaternion.y, startQuaternion.z, startQuaternion.w)
+  body.allowSleep = !definition
+  body.sleepSpeedLimit = definition ? 0.035 : 0.15
+  body.sleepTimeLimit = definition ? 0.9 : 0.25
   world.addBody(body)
 
   return {
@@ -421,6 +648,11 @@ function createDie(x, z, index) {
   }
 }
 
+function getFaceDownQuaternion(definition, faceIndex) {
+  const normal = definition.faceNormals[faceIndex].clone().normalize()
+  return new THREE.Quaternion().setFromUnitVectors(normal, new THREE.Vector3(0, -1, 0))
+}
+
 function clearDice() {
   for (const dieData of dice) {
     scene.remove(dieData.mesh)
@@ -432,6 +664,14 @@ function clearDice() {
 }
 
 function createPhysicsShape(geometry, faceCount) {
+  const definition = geometry.userData.polyDefinition
+  if (definition) {
+    return new CANNON.ConvexPolyhedron({
+      vertices: definition.vertices.map(([x, y, z]) => new CANNON.Vec3(x, y, z)),
+      faces: definition.faces,
+    })
+  }
+
   if (faceCount === 6) {
     geometry.computeBoundingBox()
     const box = geometry.boundingBox
@@ -519,8 +759,34 @@ function areRollingDiceSleeping() {
     .filter((dieData) => !dieData.kept)
     .every((dieData) =>
       dieData.body.velocity.length() < 0.1 &&
-      dieData.body.angularVelocity.length() < 0.1
+      dieData.body.angularVelocity.length() < 0.1 &&
+      isDieSettledOnFace(dieData)
     )
+}
+
+function isDieSettledOnFace(dieData) {
+  const faceNormals = dieData.mesh.geometry.userData.faceNormals
+  if (!faceNormals) return true
+
+  const down = new THREE.Vector3(0, -1, 0)
+  let bestDot = -Infinity
+  for (const entry of faceNormals) {
+    const dot = entry.normal.clone().applyQuaternion(dieData.mesh.quaternion).dot(down)
+    bestDot = Math.max(bestDot, dot)
+  }
+
+  if (bestDot >= FACE_SETTLE_DOT) return true
+
+  const body = dieData.body
+  if (body.velocity.length() < 0.08 && body.angularVelocity.length() < 0.08) {
+    body.wakeUp()
+    body.angularVelocity.set(
+      body.angularVelocity.x + (Math.random() - 0.5) * 1.2,
+      body.angularVelocity.y,
+      body.angularVelocity.z + (Math.random() - 0.5) * 1.2
+    )
+  }
+  return false
 }
 
 function determineDieFaceValue(dieData) {
@@ -546,6 +812,18 @@ function determineDieFaceValue(dieData) {
     return bestValue
   }
   const geometry = dieData.mesh.geometry
+  if (geometry.userData.faceNormals) {
+    let bestValue = 1
+    let bestDot = -Infinity
+    for (const entry of geometry.userData.faceNormals) {
+      const dot = entry.normal.clone().applyQuaternion(dieData.mesh.quaternion).dot(up)
+      if (dot > bestDot) {
+        bestDot = dot
+        bestValue = entry.value
+      }
+    }
+    return bestValue
+  }
   const position = geometry.attributes.position
   const normals = []
   const normal = new THREE.Vector3()
