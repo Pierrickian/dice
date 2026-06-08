@@ -516,23 +516,27 @@ function createPolyDieDefinition(faceCount) {
 
 function createDieGeometry(faceCount) {
   const definition = getPolyDieDefinition(faceCount)
-  if (definition) return createPolyDieGeometry(definition)
+  if (definition) return createPolyDieGeometry(definition, faceCount)
 
   switch (faceCount) {
-    case 6:
-      return new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
+    case 6: {
+      const geometry = new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
+      geometry.userData.physicsDefinition = createConvexDefinitionFromGeometry(geometry)
+      return geometry
+    }
     default:
       return new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
   }
 }
 
-function createPolyDieGeometry(definition) {
+function createPolyDieGeometry(definition, faceCount) {
+  const physicsDefinition = createBeveledPolyDieDefinition(definition, faceCount)
   const vertices = []
-  for (const face of definition.faces) {
+  for (const face of physicsDefinition.faces) {
     for (let i = 1; i < face.length - 1; i += 1) {
-      vertices.push(...definition.vertices[face[0]])
-      vertices.push(...definition.vertices[face[i]])
-      vertices.push(...definition.vertices[face[i + 1]])
+      vertices.push(...physicsDefinition.vertices[face[0]])
+      vertices.push(...physicsDefinition.vertices[face[i]])
+      vertices.push(...physicsDefinition.vertices[face[i + 1]])
     }
   }
 
@@ -540,11 +544,138 @@ function createPolyDieGeometry(definition) {
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
   applySoftVisualNormals(geometry)
   geometry.userData.polyDefinition = definition
+  geometry.userData.physicsDefinition = physicsDefinition
   geometry.userData.faceNormals = definition.faceNormals.map((normal, index) => ({
     value: index + 1,
     normal,
   }))
   return geometry
+}
+
+function getPolyBevelFactor(faceCount) {
+  switch (faceCount) {
+    case 4:
+      return 0.1
+    case 8:
+      return 0.065
+    case 10:
+      return 0.052
+    case 12:
+      return 0.045
+    case 20:
+      return 0.032
+    default:
+      return 0.05
+  }
+}
+
+function createBeveledPolyDieDefinition(definition, faceCount) {
+  const bevel = getPolyBevelFactor(faceCount)
+  const vertices = []
+  const faces = []
+  const faceVertexIndex = new Map()
+  const originalVertexFaces = new Map()
+  const edgeRecords = new Map()
+
+  definition.faces.forEach((face, faceIndex) => {
+    const faceCenter = face.reduce((sum, vertexIndex) => {
+      const vertex = new THREE.Vector3(...definition.vertices[vertexIndex])
+      return sum.add(vertex)
+    }, new THREE.Vector3()).multiplyScalar(1 / face.length)
+
+    const insetFace = face.map((vertexIndex) => {
+      const vertex = new THREE.Vector3(...definition.vertices[vertexIndex])
+      vertex.lerp(faceCenter, bevel)
+      const newIndex = vertices.length
+      vertices.push([vertex.x, vertex.y, vertex.z])
+      faceVertexIndex.set(`${faceIndex}:${vertexIndex}`, newIndex)
+
+      if (!originalVertexFaces.has(vertexIndex)) originalVertexFaces.set(vertexIndex, [])
+      originalVertexFaces.get(vertexIndex).push(faceIndex)
+      return newIndex
+    })
+    faces.push(insetFace)
+
+    for (let i = 0; i < face.length; i += 1) {
+      const a = face[i]
+      const b = face[(i + 1) % face.length]
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`
+      if (!edgeRecords.has(key)) edgeRecords.set(key, [])
+      edgeRecords.get(key).push({ faceIndex, a, b })
+    }
+  })
+
+  edgeRecords.forEach((records) => {
+    if (records.length !== 2) return
+    const [first, second] = records
+    faces.push([
+      faceVertexIndex.get(`${first.faceIndex}:${first.a}`),
+      faceVertexIndex.get(`${first.faceIndex}:${first.b}`),
+      faceVertexIndex.get(`${second.faceIndex}:${first.b}`),
+      faceVertexIndex.get(`${second.faceIndex}:${first.a}`),
+    ])
+  })
+
+  originalVertexFaces.forEach((faceIndices, vertexIndex) => {
+    if (faceIndices.length < 3) return
+    const axis = new THREE.Vector3(...definition.vertices[vertexIndex]).normalize()
+    const reference = new THREE.Vector3(...vertices[faceVertexIndex.get(`${faceIndices[0]}:${vertexIndex}`)])
+      .projectOnPlane(axis)
+      .normalize()
+    const tangent = new THREE.Vector3().crossVectors(axis, reference).normalize()
+    const cornerFace = faceIndices
+      .map(faceIndex => faceVertexIndex.get(`${faceIndex}:${vertexIndex}`))
+      .sort((a, b) => {
+        const pa = new THREE.Vector3(...vertices[a]).projectOnPlane(axis).normalize()
+        const pb = new THREE.Vector3(...vertices[b]).projectOnPlane(axis).normalize()
+        return Math.atan2(pa.dot(tangent), pa.dot(reference)) -
+          Math.atan2(pb.dot(tangent), pb.dot(reference))
+      })
+    faces.push(cornerFace)
+  })
+
+  return {
+    vertices,
+    faces: orientFacesOutward(vertices, faces),
+    faceNormals: definition.faceNormals,
+    faceDistances: definition.faceDistances,
+  }
+}
+
+function createConvexDefinitionFromGeometry(geometry) {
+  const source = geometry.index ? geometry : geometry.toNonIndexed()
+  const position = source.getAttribute('position')
+  const index = source.index
+  const vertices = []
+  const vertexMap = new Map()
+  const faces = []
+
+  function getVertexIndex(attributeIndex) {
+    const x = position.getX(attributeIndex)
+    const y = position.getY(attributeIndex)
+    const z = position.getZ(attributeIndex)
+    const key = `${x.toFixed(5)}:${y.toFixed(5)}:${z.toFixed(5)}`
+    if (!vertexMap.has(key)) {
+      vertexMap.set(key, vertices.length)
+      vertices.push([x, y, z])
+    }
+    return vertexMap.get(key)
+  }
+
+  const count = index ? index.count : position.count
+  for (let i = 0; i < count; i += 3) {
+    const face = [
+      getVertexIndex(index ? index.getX(i) : i),
+      getVertexIndex(index ? index.getX(i + 1) : i + 1),
+      getVertexIndex(index ? index.getX(i + 2) : i + 2),
+    ]
+    if (new Set(face).size === 3) faces.push(face)
+  }
+
+  return {
+    vertices,
+    faces: orientFacesOutward(vertices, faces),
+  }
 }
 
 function applySoftVisualNormals(geometry) {
@@ -823,7 +954,7 @@ function clearDice() {
 }
 
 function createPhysicsShape(geometry, faceCount) {
-  const definition = geometry.userData.polyDefinition
+  const definition = geometry.userData.physicsDefinition || geometry.userData.polyDefinition
   if (definition) {
     return new CANNON.ConvexPolyhedron({
       vertices: definition.vertices.map(([x, y, z]) => new CANNON.Vec3(x, y, z)),
