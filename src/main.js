@@ -154,10 +154,12 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   1000
 )
-camera.position.set(0, 4, 8)
-camera.lookAt(0, 0, 0)
-const cameraTarget = new THREE.Vector3(0, 0, 0)
-const cameraOffset = new THREE.Vector3(0, 4.2, 8.4)
+const CAMERA_DEFAULT_POSITION = new THREE.Vector3(0, 4, 8)
+const CAMERA_DEFAULT_TARGET = new THREE.Vector3(0, 0, 0)
+camera.position.copy(CAMERA_DEFAULT_POSITION)
+camera.lookAt(CAMERA_DEFAULT_TARGET)
+const cameraTarget = CAMERA_DEFAULT_TARGET.clone()
+const cameraOffset = CAMERA_DEFAULT_POSITION.clone().sub(CAMERA_DEFAULT_TARGET)
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -197,7 +199,7 @@ const diceMaterial = new CANNON.Material('dice')
 const floorMaterialBody = new CANNON.Material('floor')
 const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBody, {
   friction: 1.45,
-  restitution: 0.08,
+  restitution: 0.02,
   contactEquationStiffness: 1e7,
   contactEquationRelaxation: 4,
   frictionEquationStiffness: 1e7,
@@ -205,7 +207,7 @@ const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBo
 })
 world.addContactMaterial(contactMaterial)
 world.defaultContactMaterial.friction = 1.2
-world.defaultContactMaterial.restitution = 0.06
+world.defaultContactMaterial.restitution = 0.02
 
 const floorBody = new CANNON.Body({
   mass: 0,
@@ -229,8 +231,8 @@ const timeStep = 1 / 60
 const boundaryRadius = 4.5
 const FACE_SETTLE_DOT = 0.86
 const REALISTIC_DIE_MASS_KG = 0.006
-const CAMERA_MIN_RADIUS = 2.9
-const CAMERA_MARGIN = 1.55
+const CAMERA_FALLBACK_RADIUS = 1.4
+const CAMERA_MARGIN = 1.12
 
 let dice = []
 let rollInProgress = false
@@ -731,7 +733,7 @@ function resetDiePhysics(dieData) {
   body.angularVelocity.set(0, 0, 0)
   body.position.set(
     dieData.mesh.position.x,
-    FLOOR_Y + 1.45 + Math.random() * 0.35,
+    FLOOR_Y + 0.95 + Math.random() * 0.2,
     dieData.mesh.position.z
   )
   body.quaternion.set(
@@ -747,7 +749,7 @@ function resetDiePhysics(dieData) {
 function applyDieImpulse(body) {
   const impulse = new CANNON.Vec3(
     (Math.random() - 0.5) * 0.024,
-    0.018 + Math.random() * 0.012,
+    0,
     (Math.random() - 0.5) * 0.024
   )
   const offCenter = new CANNON.Vec3(
@@ -798,15 +800,6 @@ function isDieSettledOnFace(dieData) {
 
   if (bestDot >= FACE_SETTLE_DOT) return true
 
-  const body = dieData.body
-  if (body.velocity.length() < 0.08 && body.angularVelocity.length() < 0.08) {
-    body.wakeUp()
-    body.angularVelocity.set(
-      body.angularVelocity.x + (Math.random() - 0.5) * 1.2,
-      body.angularVelocity.y,
-      body.angularVelocity.z + (Math.random() - 0.5) * 1.2
-    )
-  }
   return false
 }
 
@@ -987,7 +980,10 @@ function animate() {
 function updateCameraFrame(delta) {
   const bounds = getVisibleDiceBounds()
   const desiredTarget = bounds.center
-  const desiredDistance = getCameraDistanceForRadius(bounds.radius)
+  const desiredDistance = Math.max(
+    cameraOffset.length(),
+    getCameraDistanceForRadius(bounds.radius)
+  )
   const desiredPosition = desiredTarget.clone().add(
     cameraOffset.clone().normalize().multiplyScalar(desiredDistance)
   )
@@ -1003,7 +999,7 @@ function getVisibleDiceBounds() {
   if (visibleDice.length === 0) {
     return {
       center: new THREE.Vector3(0, FLOOR_Y + 0.5, 0),
-      radius: CAMERA_MIN_RADIUS,
+      radius: CAMERA_FALLBACK_RADIUS,
     }
   }
 
@@ -1015,7 +1011,7 @@ function getVisibleDiceBounds() {
 
   const center = box.getCenter(new THREE.Vector3())
   const size = box.getSize(new THREE.Vector3())
-  const radius = Math.max(CAMERA_MIN_RADIUS, size.length() * 0.5 + 0.65)
+  const radius = Math.max(CAMERA_FALLBACK_RADIUS, size.length() * 0.5 + 0.45)
   center.y = Math.max(center.y, FLOOR_Y + 0.45)
 
   return { center, radius }
