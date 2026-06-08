@@ -38,6 +38,7 @@ jobs:
           npx gh-pages \
             --dist dist \
             --branch gh-pages \
+            --repo "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             --user "github-actions-bot <support+actions@github.com>" \
             --message "Deploy ${{ github.sha }}"
         env:
