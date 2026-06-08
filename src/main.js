@@ -362,6 +362,8 @@ let aimInProgress = false
 let aimStartWorld = null
 let aimCurrentWorld = null
 let activePointerId = null
+let pendingAimTimer = null
+let pendingAimData = null
 let currentFaces = Number(diceFacesSelect.value)
 let currentRoll = 0
 let scoreCumule = 0
@@ -1424,43 +1426,83 @@ function releaseAimPointer(pointerId) {
   }
 }
 
-function beginAim(event) {
-  activePointers.set(event.pointerId, {
-    clientX: event.clientX,
-    clientY: event.clientY,
-  })
-  canvas.setPointerCapture(event.pointerId)
-
-  if (activePointers.size >= 2) {
-    beginPinchZoom()
-    return
+function clearPendingAim() {
+  if (pendingAimTimer != null) {
+    clearTimeout(pendingAimTimer)
   }
+  pendingAimTimer = null
+  pendingAimData = null
+}
 
+function startAimFromPointer(pointerData) {
+  if (!activePointers.has(pointerData.pointerId)) return
+  if (activePointers.size !== 1 || pinchInProgress) return
   if (rollInProgress || activePointerId != null) return
   if (pendingRoundReset || canFinishRound || currentRoll >= MAX_ROLLS) {
     rollDice()
     return
   }
 
-  const floorPoint = getFloorPointFromPointer(event)
+  const floorPoint = getFloorPointFromScreen(pointerData.clientX, pointerData.clientY)
   if (!floorPoint) return
 
-  activePointerId = event.pointerId
+  activePointerId = pointerData.pointerId
   aimInProgress = true
   aimStartWorld = floorPoint.clone()
   aimCurrentWorld = floorPoint.clone()
-  dragStartScreen.set(event.clientX, event.clientY)
+  dragStartScreen.set(pointerData.clientX, pointerData.clientY)
   dragCurrentScreen.copy(dragStartScreen)
   placeRollableDice(aimStartWorld, true)
   updateAimIndicator(dragStartScreen, dragCurrentScreen)
 }
 
+function beginAim(event) {
+  activePointers.set(event.pointerId, {
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  })
+  canvas.setPointerCapture(event.pointerId)
+
+  if (activePointers.size >= 2) {
+    clearPendingAim()
+    beginPinchZoom()
+    return
+  }
+
+  const pointerData = {
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  }
+  if (event.pointerType === 'touch') {
+    clearPendingAim()
+    pendingAimData = pointerData
+    pendingAimTimer = setTimeout(() => {
+      const data = pendingAimData
+      clearPendingAim()
+      if (data) startAimFromPointer(data)
+    }, 140)
+    return
+  }
+
+  startAimFromPointer(pointerData)
+}
+
 function updateAim(event) {
   if (activePointers.has(event.pointerId)) {
     activePointers.set(event.pointerId, {
+      pointerId: event.pointerId,
       clientX: event.clientX,
       clientY: event.clientY,
     })
+  }
+  if (pendingAimData?.pointerId === event.pointerId) {
+    pendingAimData = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    }
   }
   if (pinchInProgress) {
     updatePinchZoom()
@@ -1483,6 +1525,9 @@ function finishAim(event) {
     return
   }
 
+  if (pendingAimData?.pointerId === event.pointerId) {
+    clearPendingAim()
+  }
   activePointers.delete(event.pointerId)
   releaseAimPointer(event.pointerId)
   if (!aimInProgress || event.pointerId !== activePointerId) return
@@ -1501,6 +1546,9 @@ function finishAim(event) {
 }
 
 function cancelAim(event) {
+  if (pendingAimData?.pointerId === event.pointerId) {
+    clearPendingAim()
+  }
   activePointers.delete(event.pointerId)
   if (pinchInProgress) {
     releaseAimPointer(event.pointerId)
