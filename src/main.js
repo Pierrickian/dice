@@ -205,7 +205,7 @@ camera.position.copy(CAMERA_DEFAULT_POSITION)
 camera.lookAt(CAMERA_DEFAULT_TARGET)
 const cameraTarget = CAMERA_DEFAULT_TARGET.clone()
 const cameraOffset = CAMERA_DEFAULT_POSITION.clone().sub(CAMERA_DEFAULT_TARGET)
-const CAMERA_SCREEN_LOWER_TARGET_OFFSET = 1.55
+const CAMERA_SCREEN_LOWER_TARGET_OFFSET = 3.4
 const raycaster = new THREE.Raycaster()
 const pointerNdc = new THREE.Vector2()
 const dragStartScreen = new THREE.Vector2()
