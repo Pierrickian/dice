@@ -210,6 +210,12 @@ const raycaster = new THREE.Raycaster()
 const pointerNdc = new THREE.Vector2()
 const dragStartScreen = new THREE.Vector2()
 const dragCurrentScreen = new THREE.Vector2()
+const activePointers = new Map()
+const cameraPanOffset = new THREE.Vector3()
+let cameraZoomScale = 1
+let pinchInProgress = false
+let pinchStartDistance = 0
+let pinchStartZoomScale = 1
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -1243,11 +1249,96 @@ function finalizeRound() {
 
 function getFloorPointFromPointer(event) {
   const rect = canvas.getBoundingClientRect()
-  pointerNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-  pointerNdc.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1)
+  return getFloorPointFromScreen(event.clientX, event.clientY, rect)
+}
+
+function getFloorPointFromScreen(clientX, clientY, rect = canvas.getBoundingClientRect()) {
+  pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1
+  pointerNdc.y = -(((clientY - rect.top) / rect.height) * 2 - 1)
   raycaster.setFromCamera(pointerNdc, camera)
   const point = new THREE.Vector3()
   return raycaster.ray.intersectPlane(floorPickPlane, point) ? point : null
+}
+
+function getPinchPointers() {
+  return [...activePointers.values()].slice(0, 2)
+}
+
+function getPinchMidpoint() {
+  const [a, b] = getPinchPointers()
+  if (!a || !b) return null
+  return {
+    x: (a.clientX + b.clientX) * 0.5,
+    y: (a.clientY + b.clientY) * 0.5,
+  }
+}
+
+function getPinchDistance() {
+  const [a, b] = getPinchPointers()
+  if (!a || !b) return 0
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+}
+
+function getCameraFrame() {
+  const bounds = getVisibleDiceBounds()
+  const target = bounds.center.clone().add(cameraPanOffset)
+  target.y += CAMERA_SCREEN_LOWER_TARGET_OFFSET
+  const distance = Math.max(
+    cameraOffset.length(),
+    getCameraDistanceForRadius(bounds.radius)
+  ) * cameraZoomScale
+  const position = target.clone().add(
+    cameraOffset.clone().normalize().multiplyScalar(distance)
+  )
+  return { target, position }
+}
+
+function applyCameraFrame(delta, snap = false) {
+  const frame = getCameraFrame()
+  const smoothing = snap ? 1 : 1 - Math.exp(-delta * 5.5)
+  cameraTarget.lerp(frame.target, smoothing)
+  camera.position.lerp(frame.position, smoothing)
+  camera.lookAt(cameraTarget)
+}
+
+function beginPinchZoom() {
+  if (aimInProgress) {
+    aimInProgress = false
+    activePointerId = null
+    hideAimIndicator()
+    releaseAimedDice()
+  }
+  pinchInProgress = true
+  pinchStartDistance = getPinchDistance()
+  pinchStartZoomScale = cameraZoomScale
+}
+
+function updatePinchZoom() {
+  if (!pinchInProgress || activePointers.size < 2 || pinchStartDistance <= 0) return
+  const midpoint = getPinchMidpoint()
+  if (!midpoint) return
+
+  const before = getFloorPointFromScreen(midpoint.x, midpoint.y)
+  const nextDistance = getPinchDistance()
+  cameraZoomScale = THREE.MathUtils.clamp(
+    pinchStartZoomScale * (pinchStartDistance / Math.max(1, nextDistance)),
+    0.45,
+    3.2
+  )
+  applyCameraFrame(0, true)
+
+  const after = getFloorPointFromScreen(midpoint.x, midpoint.y)
+  if (before && after) {
+    cameraPanOffset.add(before.sub(after))
+    applyCameraFrame(0, true)
+  }
+}
+
+function endPinchZoom() {
+  if (activePointers.size < 2) {
+    pinchInProgress = false
+    pinchStartDistance = 0
+  }
 }
 
 function getLaunchFromDrag(start, end) {
@@ -1334,6 +1425,17 @@ function releaseAimPointer(pointerId) {
 }
 
 function beginAim(event) {
+  activePointers.set(event.pointerId, {
+    clientX: event.clientX,
+    clientY: event.clientY,
+  })
+  canvas.setPointerCapture(event.pointerId)
+
+  if (activePointers.size >= 2) {
+    beginPinchZoom()
+    return
+  }
+
   if (rollInProgress || activePointerId != null) return
   if (pendingRoundReset || canFinishRound || currentRoll >= MAX_ROLLS) {
     rollDice()
@@ -1349,12 +1451,22 @@ function beginAim(event) {
   aimCurrentWorld = floorPoint.clone()
   dragStartScreen.set(event.clientX, event.clientY)
   dragCurrentScreen.copy(dragStartScreen)
-  canvas.setPointerCapture(event.pointerId)
   placeRollableDice(aimStartWorld, true)
   updateAimIndicator(dragStartScreen, dragCurrentScreen)
 }
 
 function updateAim(event) {
+  if (activePointers.has(event.pointerId)) {
+    activePointers.set(event.pointerId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    })
+  }
+  if (pinchInProgress) {
+    updatePinchZoom()
+    return
+  }
+
   if (!aimInProgress || event.pointerId !== activePointerId) return
   const floorPoint = getFloorPointFromPointer(event)
   if (floorPoint) aimCurrentWorld = floorPoint.clone()
@@ -1364,6 +1476,15 @@ function updateAim(event) {
 }
 
 function finishAim(event) {
+  if (pinchInProgress) {
+    activePointers.delete(event.pointerId)
+    releaseAimPointer(event.pointerId)
+    endPinchZoom()
+    return
+  }
+
+  activePointers.delete(event.pointerId)
+  releaseAimPointer(event.pointerId)
   if (!aimInProgress || event.pointerId !== activePointerId) return
   const floorPoint = getFloorPointFromPointer(event)
   if (floorPoint) aimCurrentWorld = floorPoint.clone()
@@ -1372,7 +1493,6 @@ function finishAim(event) {
   aimInProgress = false
   activePointerId = null
   hideAimIndicator()
-  releaseAimPointer(event.pointerId)
   if (launch) {
     rollDice(launch)
   } else {
@@ -1381,6 +1501,13 @@ function finishAim(event) {
 }
 
 function cancelAim(event) {
+  activePointers.delete(event.pointerId)
+  if (pinchInProgress) {
+    releaseAimPointer(event.pointerId)
+    endPinchZoom()
+    return
+  }
+
   if (!aimInProgress || event.pointerId !== activePointerId) return
   aimInProgress = false
   activePointerId = null
@@ -1445,21 +1572,7 @@ function animate() {
 }
 
 function updateCameraFrame(delta) {
-  const bounds = getVisibleDiceBounds()
-  const desiredTarget = bounds.center.clone()
-  desiredTarget.y += CAMERA_SCREEN_LOWER_TARGET_OFFSET
-  const desiredDistance = Math.max(
-    cameraOffset.length(),
-    getCameraDistanceForRadius(bounds.radius)
-  )
-  const desiredPosition = desiredTarget.clone().add(
-    cameraOffset.clone().normalize().multiplyScalar(desiredDistance)
-  )
-  const smoothing = 1 - Math.exp(-delta * 5.5)
-
-  cameraTarget.lerp(desiredTarget, smoothing)
-  camera.position.lerp(desiredPosition, smoothing)
-  camera.lookAt(cameraTarget)
+  applyCameraFrame(delta)
 }
 
 function getVisibleDiceBounds() {
