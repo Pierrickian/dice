@@ -199,15 +199,15 @@ world.solver.tolerance = 0.001
 const diceMaterial = new CANNON.Material('dice')
 const floorMaterialBody = new CANNON.Material('floor')
 const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBody, {
-  friction: 2.25,
+  friction: 1.25,
   restitution: 0.02,
   contactEquationStiffness: 1e7,
   contactEquationRelaxation: 4,
   frictionEquationStiffness: 1e7,
-  frictionEquationRelaxation: 3,
+  frictionEquationRelaxation: 4,
 })
 world.addContactMaterial(contactMaterial)
-world.defaultContactMaterial.friction = 1.8
+world.defaultContactMaterial.friction = 1.0
 world.defaultContactMaterial.restitution = 0.02
 
 const floorBody = new CANNON.Body({
@@ -230,7 +230,7 @@ const clock = {
 }
 const timeStep = 1 / 60
 const boundaryRadius = 4.5
-const FACE_SETTLE_DOT = 0.86
+const FACE_SETTLE_DOT = 0.82
 const REALISTIC_DIE_MASS_KG = 0.006
 const CAMERA_FALLBACK_RADIUS = 1.4
 const CAMERA_MARGIN = 1.12
@@ -643,8 +643,8 @@ function createDie(x, z, index) {
     mass: REALISTIC_DIE_MASS_KG,
     shape,
     position: new CANNON.Vec3(startPosition.x, startPosition.y, startPosition.z),
-    linearDamping: 0.68,
-    angularDamping: 0.84,
+    linearDamping: 0.5,
+    angularDamping: 0.62,
     material: diceMaterial,
   })
   body.quaternion.set(startQuaternion.x, startQuaternion.y, startQuaternion.z, startQuaternion.w)
