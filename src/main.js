@@ -11,6 +11,35 @@ const MAX_ROLLS = ROUND.max_rolls_per_round
 const SCORE_RESET_THRESHOLD = SCORING.score_reset.threshold
 const POINTS_PER_DIE = SCORING.per_die_banked.points
 
+const DEFAULT_LANGUAGE = 'fr'
+const TRANSLATIONS = {
+  fr: {
+    diceCountLabel: 'Nombre de dés',
+    diceFacesLabel: 'Nombre de faces',
+    menuLabel: 'Menu',
+    resetButton: 'Réinitialiser',
+    toggleLanguageLabel: 'Passer en anglais',
+    toggleLanguageFlag: '🇬🇧',
+    rollHeader: (current, max) => `Lancer ${current} / ${max}`,
+    scoreDisplay: score => `Score : ${score}`,
+  },
+  en: {
+    diceCountLabel: 'Number of dice',
+    diceFacesLabel: 'Number of sides',
+    menuLabel: 'Menu',
+    resetButton: 'Reset',
+    toggleLanguageLabel: 'Switch to French',
+    toggleLanguageFlag: '🇫🇷',
+    rollHeader: (current, max) => `Roll ${current} / ${max}`,
+    scoreDisplay: score => `Score: ${score}`,
+  },
+}
+let currentLanguage = DEFAULT_LANGUAGE
+
+function getTranslations() {
+  return TRANSLATIONS[currentLanguage]
+}
+
 function getEarlyBonus(rollsUsed) {
   const entry = SCORING.early_finish_bonus.bonuses.find(b => b.rolls_used === rollsUsed)
   return entry ? entry.bonus_points : 0
@@ -97,9 +126,10 @@ app.innerHTML = `
       <span></span>
       <span></span>
     </button>
+    <button id="language-toggle" type="button" aria-label="Passer en anglais">🇬🇧</button>
     <div id="menu-panel" class="closed">
       <div class="control-row">
-        <label for="dice-count">Nombre de dés</label>
+        <label id="dice-count-label" for="dice-count">Nombre de dés</label>
         <select id="dice-count">
           <option value="1">1</option>
           <option value="2">2</option>
@@ -110,7 +140,7 @@ app.innerHTML = `
         </select>
       </div>
       <div class="control-row">
-        <label for="dice-faces">Nombre de faces</label>
+        <label id="dice-faces-label" for="dice-faces">Nombre de faces</label>
         <select id="dice-faces">
           <option value="4">4</option>
           <option value="6" selected>6</option>
@@ -123,7 +153,7 @@ app.innerHTML = `
     </div>
     <div id="roll-panel">
       <div id="roll-header">Lancer 1 / 3</div>
-      <div id="score-display">Score: 0</div>
+      <div id="score-display">Score : 0</div>
       <div id="dice-buttons" class="dice-buttons"></div>
       <div id="roll-controls">
         <button id="reset-button" type="button" class="secondary">Réinitialiser</button>
@@ -139,6 +169,9 @@ const diceCountSelect = document.querySelector('#dice-count')
 const diceFacesSelect = document.querySelector('#dice-faces')
 const menuButton = document.querySelector('#menu-button')
 const menuPanel = document.querySelector('#menu-panel')
+const languageToggle = document.querySelector('#language-toggle')
+const diceCountLabel = document.querySelector('#dice-count-label')
+const diceFacesLabel = document.querySelector('#dice-faces-label')
 const rollHeader = document.querySelector('#roll-header')
 const diceButtonsContainer = document.querySelector('#dice-buttons')
 const resetButton = document.querySelector('#reset-button')
@@ -246,7 +279,7 @@ function getDieColor(index) {
 }
 
 function formatRollHeader() {
-  return `Lancer ${currentRoll} / ${MAX_ROLLS}`
+  return getTranslations().rollHeader(currentRoll, MAX_ROLLS)
 }
 
 function updateRollUI() {
@@ -266,7 +299,26 @@ function showScoreAnimation(text, dieData, isFinal = false) {
 }
 
 function updateScoreDisplay() {
-  scoreDisplay.textContent = `Score: ${scoreCumule}`
+  scoreDisplay.textContent = getTranslations().scoreDisplay(scoreCumule)
+}
+
+function applyLocalization() {
+  const translations = getTranslations()
+  document.documentElement.lang = currentLanguage
+  menuButton.setAttribute('aria-label', translations.menuLabel)
+  languageToggle.textContent = translations.toggleLanguageFlag
+  languageToggle.setAttribute('aria-label', translations.toggleLanguageLabel)
+  languageToggle.setAttribute('title', translations.toggleLanguageLabel)
+  diceCountLabel.textContent = translations.diceCountLabel
+  diceFacesLabel.textContent = translations.diceFacesLabel
+  resetButton.textContent = translations.resetButton
+  updateRollUI()
+  updateScoreDisplay()
+}
+
+function toggleLanguage() {
+  currentLanguage = currentLanguage === 'fr' ? 'en' : 'fr'
+  applyLocalization()
 }
 
 function toggleMenu() {
@@ -671,6 +723,7 @@ diceFacesSelect.addEventListener('change', (event) => {
 
 canvas.addEventListener('click', rollDice)
 menuButton.addEventListener('click', toggleMenu)
+languageToggle.addEventListener('click', toggleLanguage)
 resetButton.addEventListener('click', () => createDice(Number(diceCountSelect.value)))
 
 function animate() {
@@ -700,6 +753,7 @@ function animateCameraZoom(delta) {
   camera.lookAt(0, 0, 0)
 }
 
+applyLocalization()
 createDice(Number(diceCountSelect.value))
 animate()
 
