@@ -566,15 +566,15 @@ function getPolyBevelFactor(faceCount) {
     case 4:
       return 0.1
     case 8:
-      return 0.02
+      return 0.03
     case 10:
-      return 0.014
+      return 0.022
     case 12:
-      return 0.01
+      return 0.016
     case 20:
-      return 0.006
+      return 0.01
     default:
-      return 0.008
+      return 0.012
   }
 }
 
@@ -1293,6 +1293,7 @@ function getCameraFrame() {
 }
 
 function applyCameraFrame(delta, snap = false) {
+  if (!snap && (aimInProgress || pendingAimData)) return
   if (!snap && !pinchInProgress) {
     cameraPanOffset.lerp(new THREE.Vector3(0, 0, 0), 1 - Math.exp(-delta * 0.9))
   }
@@ -1344,13 +1345,13 @@ function endPinchZoom() {
 }
 
 function getLaunchFromDrag(start, end) {
-  const drag = end.clone().sub(start)
-  drag.y = 0
-  const distance = drag.length()
+  const dragPointToOrigin = start.clone().sub(end)
+  dragPointToOrigin.y = 0
+  const distance = dragPointToOrigin.length()
   if (distance < 0.12) return null
   const forceRatio = Math.min(1, distance / MAX_DRAG_DISTANCE)
   return {
-    direction: drag.multiplyScalar(-1).normalize(),
+    direction: dragPointToOrigin.normalize(),
     forceRatio,
   }
 }
