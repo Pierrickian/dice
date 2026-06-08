@@ -124,11 +124,17 @@ app.innerHTML = `
     <div id="roll-panel">
       <div id="roll-header">Lancer 1 / 3</div>
       <div id="score-display">Score: 0</div>
+      <div id="friction-control">
+        <label for="friction-slider">Adhérence</label>
+        <input id="friction-slider" type="range" min="0.4" max="2.4" step="0.05" value="1.25">
+        <output id="friction-value" for="friction-slider">1.25</output>
+      </div>
       <div id="dice-buttons" class="dice-buttons"></div>
       <div id="roll-controls">
         <button id="reset-button" type="button" class="secondary">Réinitialiser</button>
       </div>
     </div>
+    <div id="aim-indicator"></div>
     <div id="score-animations"></div>
   </div>
   <canvas id="bg"></canvas>
@@ -144,6 +150,9 @@ const diceButtonsContainer = document.querySelector('#dice-buttons')
 const resetButton = document.querySelector('#reset-button')
 const scoreDisplay = document.querySelector('#score-display')
 const scoreAnimations = document.querySelector('#score-animations')
+const frictionSlider = document.querySelector('#friction-slider')
+const frictionValue = document.querySelector('#friction-value')
+const aimIndicator = document.querySelector('#aim-indicator')
 resetButton.style.display = 'none'
 
 const scene = new THREE.Scene()
@@ -161,6 +170,10 @@ camera.lookAt(CAMERA_DEFAULT_TARGET)
 const cameraTarget = CAMERA_DEFAULT_TARGET.clone()
 const cameraOffset = CAMERA_DEFAULT_POSITION.clone().sub(CAMERA_DEFAULT_TARGET)
 const CAMERA_SCREEN_LOWER_TARGET_OFFSET = 0.75
+const raycaster = new THREE.Raycaster()
+const pointerNdc = new THREE.Vector2()
+const dragStartScreen = new THREE.Vector2()
+const dragCurrentScreen = new THREE.Vector2()
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -185,6 +198,7 @@ const floorMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.1,
 })
 const FLOOR_Y = -1.5
+const floorPickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -FLOOR_Y)
 const floor = new THREE.Mesh(floorGeometry, floorMaterial)
 floor.rotation.x = -Math.PI / 2
 floor.position.y = FLOOR_Y
@@ -210,6 +224,14 @@ world.addContactMaterial(contactMaterial)
 world.defaultContactMaterial.friction = 1.0
 world.defaultContactMaterial.restitution = 0.02
 
+function setGroundFriction(value) {
+  contactMaterial.friction = value
+  world.defaultContactMaterial.friction = Math.max(0.1, value * 0.8)
+  frictionValue.textContent = value.toFixed(2)
+}
+
+setGroundFriction(Number(frictionSlider.value))
+
 const floorBody = new CANNON.Body({
   mass: 0,
   shape: new CANNON.Plane(),
@@ -234,10 +256,17 @@ const FACE_SETTLE_DOT = 0.82
 const REALISTIC_DIE_MASS_KG = 0.006
 const CAMERA_FALLBACK_RADIUS = 1.4
 const CAMERA_MARGIN = 1.12
-const HAND_THROW_START_X = -2.75
+const D6_CLUSTER_SPACING = 1.18
+const POLY_DICE_CLUSTER_SPACING = 2.15
+const MAX_DRAG_DISTANCE = 2.8
+const MAX_THROW_IMPULSE = 0.06
 
 let dice = []
 let rollInProgress = false
+let aimInProgress = false
+let aimStartWorld = null
+let aimCurrentWorld = null
+let activePointerId = null
 let currentFaces = Number(diceFacesSelect.value)
 let currentRoll = 0
 let scoreCumule = 0
@@ -729,15 +758,30 @@ function createDice(count) {
   closeMenu()
 }
 
-function resetDiePhysics(dieData) {
+function getRollableDice() {
+  return dice.filter(dieData => !dieData.kept || currentRoll === 0)
+}
+
+function getClusterOffset(index, count) {
+  if (count <= 1) return new THREE.Vector3(0, 0, 0)
+  const angle = (index / count) * Math.PI * 2
+  const spacing = currentFaces === 6 ? D6_CLUSTER_SPACING : POLY_DICE_CLUSTER_SPACING
+  return new THREE.Vector3(
+    Math.cos(angle) * spacing,
+    0,
+    Math.sin(angle) * spacing
+  )
+}
+
+function placeDieForAiming(dieData, center, clusterIndex, activeCount) {
   const body = dieData.body
   body.velocity.set(0, 0, 0)
   body.angularVelocity.set(0, 0, 0)
-  const centeredIndex = dieData.index - (dice.length - 1) / 2
+  const offset = getClusterOffset(clusterIndex, activeCount)
   body.position.set(
-    HAND_THROW_START_X + Math.random() * 0.28,
+    center.x + offset.x,
     FLOOR_Y + 0.82 + Math.random() * 0.12,
-    centeredIndex * 0.48 + (Math.random() - 0.5) * 0.18
+    center.z + offset.z
   )
   body.quaternion.set(
     Math.random(),
@@ -746,16 +790,31 @@ function resetDiePhysics(dieData) {
     Math.random()
   )
   body.quaternion.normalize()
+  body.type = CANNON.Body.DYNAMIC
+  body.collisionResponse = true
   body.wakeUp()
 }
 
-function applyDieImpulse(dieData) {
+function placeRollableDice(center) {
+  const activeDice = getRollableDice()
+  activeDice.forEach((dieData, index) => {
+    dieData.value = null
+    dieData.rolling = false
+    dieData.mesh.visible = true
+    placeDieForAiming(dieData, center, index, activeDice.length)
+  })
+  syncPhysics()
+  renderDiceButtons()
+}
+
+function applyDieImpulse(dieData, launchVector, forceRatio) {
   const body = dieData.body
   const centeredIndex = dieData.index - (dice.length - 1) / 2
+  const sideScatter = -centeredIndex * 0.0015 + (Math.random() - 0.5) * 0.006
   const impulse = new CANNON.Vec3(
-    0.026 + Math.random() * 0.01,
+    launchVector.x * MAX_THROW_IMPULSE * forceRatio,
     0,
-    -centeredIndex * 0.002 + (Math.random() - 0.5) * 0.01
+    launchVector.z * MAX_THROW_IMPULSE * forceRatio + sideScatter
   )
   const offCenter = new CANNON.Vec3(
     (Math.random() - 0.5) * 0.45,
@@ -764,9 +823,9 @@ function applyDieImpulse(dieData) {
   )
   body.applyImpulse(impulse, offCenter)
   body.angularVelocity.set(
-    (Math.random() - 0.5) * 8,
+    launchVector.z * 6 + (Math.random() - 0.5) * 3,
     (Math.random() - 0.5) * 7,
-    -7 + Math.random() * 3
+    -launchVector.x * 6 + (Math.random() - 0.5) * 3
   )
 }
 
@@ -909,7 +968,28 @@ function clampDieBounds(dieData) {
   }
 }
 
-function rollDice() {
+function getFloorPointFromPointer(event) {
+  const rect = canvas.getBoundingClientRect()
+  pointerNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+  pointerNdc.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1)
+  raycaster.setFromCamera(pointerNdc, camera)
+  const point = new THREE.Vector3()
+  return raycaster.ray.intersectPlane(floorPickPlane, point) ? point : null
+}
+
+function getLaunchFromDrag(start, end) {
+  const drag = end.clone().sub(start)
+  drag.y = 0
+  const distance = drag.length()
+  if (distance < 0.12) return null
+  const forceRatio = Math.min(1, distance / MAX_DRAG_DISTANCE)
+  return {
+    direction: drag.multiplyScalar(-1).normalize(),
+    forceRatio,
+  }
+}
+
+function rollDice(launch) {
   if (pendingRoundReset) {
     pendingRoundReset = false
     createDice(Number(diceCountSelect.value))
@@ -936,14 +1016,17 @@ function rollDice() {
     scoreGain = 0
   }
 
-  for (const dieData of dice) {
-    if (!dieData.kept || currentRoll === 0) {
-      dieData.value = null
-      dieData.rolling = true
-      resetDiePhysics(dieData)
-      applyDieImpulse(dieData)
-    }
+  const activeDice = getRollableDice()
+  const fallbackLaunch = {
+    direction: new THREE.Vector3(1, 0, 0),
+    forceRatio: 0.55,
   }
+  const throwLaunch = launch || fallbackLaunch
+  activeDice.forEach((dieData) => {
+    dieData.value = null
+    dieData.rolling = true
+    applyDieImpulse(dieData, throwLaunch.direction, throwLaunch.forceRatio)
+  })
 
   currentRoll += 1
   rollInProgress = true
@@ -952,6 +1035,79 @@ function rollDice() {
   if (currentRoll >= MAX_ROLLS) {
     canFinishRound = true
   }
+}
+
+function updateAimIndicator(start, current) {
+  const dx = current.x - start.x
+  const dy = current.y - start.y
+  const length = Math.min(160, Math.hypot(dx, dy))
+  const angle = Math.atan2(dy, dx)
+  aimIndicator.style.left = `${start.x}px`
+  aimIndicator.style.top = `${start.y}px`
+  aimIndicator.style.width = `${length}px`
+  aimIndicator.style.transform = `rotate(${angle}rad)`
+  aimIndicator.classList.toggle('visible', length > 8)
+}
+
+function hideAimIndicator() {
+  aimIndicator.classList.remove('visible')
+}
+
+function releaseAimPointer(pointerId) {
+  if (canvas.hasPointerCapture(pointerId)) {
+    canvas.releasePointerCapture(pointerId)
+  }
+}
+
+function beginAim(event) {
+  if (rollInProgress || activePointerId != null) return
+  if (pendingRoundReset || canFinishRound || currentRoll >= MAX_ROLLS) {
+    rollDice()
+    return
+  }
+
+  const floorPoint = getFloorPointFromPointer(event)
+  if (!floorPoint) return
+
+  activePointerId = event.pointerId
+  aimInProgress = true
+  aimStartWorld = floorPoint.clone()
+  aimCurrentWorld = floorPoint.clone()
+  dragStartScreen.set(event.clientX, event.clientY)
+  dragCurrentScreen.copy(dragStartScreen)
+  canvas.setPointerCapture(event.pointerId)
+  placeRollableDice(aimStartWorld)
+  updateAimIndicator(dragStartScreen, dragCurrentScreen)
+}
+
+function updateAim(event) {
+  if (!aimInProgress || event.pointerId !== activePointerId) return
+  const floorPoint = getFloorPointFromPointer(event)
+  if (floorPoint) aimCurrentWorld = floorPoint.clone()
+  dragCurrentScreen.set(event.clientX, event.clientY)
+  updateAimIndicator(dragStartScreen, dragCurrentScreen)
+}
+
+function finishAim(event) {
+  if (!aimInProgress || event.pointerId !== activePointerId) return
+  const floorPoint = getFloorPointFromPointer(event)
+  if (floorPoint) aimCurrentWorld = floorPoint.clone()
+  const launch = getLaunchFromDrag(aimStartWorld, aimCurrentWorld)
+  aimInProgress = false
+  activePointerId = null
+  hideAimIndicator()
+  releaseAimPointer(event.pointerId)
+  if (launch) {
+    rollDice(launch)
+  }
+}
+
+function cancelAim(event) {
+  if (!aimInProgress || event.pointerId !== activePointerId) return
+  aimInProgress = false
+  activePointerId = null
+  hideAimIndicator()
+  releaseAimPointer(event.pointerId)
 }
 
 diceCountSelect.addEventListener('change', (event) => {
@@ -965,7 +1121,14 @@ diceFacesSelect.addEventListener('change', (event) => {
   closeMenu()
 })
 
-canvas.addEventListener('click', rollDice)
+frictionSlider.addEventListener('input', (event) => {
+  setGroundFriction(Number(event.target.value))
+})
+
+canvas.addEventListener('pointerdown', beginAim)
+canvas.addEventListener('pointermove', updateAim)
+canvas.addEventListener('pointerup', finishAim)
+canvas.addEventListener('pointercancel', cancelAim)
 menuButton.addEventListener('click', toggleMenu)
 resetButton.addEventListener('click', () => createDice(Number(diceCountSelect.value)))
 
