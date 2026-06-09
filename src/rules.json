@@ -55,6 +55,11 @@
       }
     },
 
+    "result_display": {
+      "description": "During a roll, each die reveals the face currently pointing most upward only after that die has touched the floor for the configured delay.",
+      "face_reveal_after_floor_contact_seconds": 0.7
+    },
+
     "banking_rules": {
       "description": "After each roll, only certain dice are eligible to be banked. A die must match at least one condition below. After the final roll, all dice become eligible regardless of combinations.",
       "note_on_third_roll": "On the final roll (3/3), all dice become selectable — no combination is required.",

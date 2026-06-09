@@ -11,6 +11,8 @@ const SCORING = RULES.game.scoring
 const MAX_ROLLS = ROUND.max_rolls_per_round
 const SCORE_RESET_THRESHOLD = SCORING.score_reset.threshold
 const POINTS_PER_DIE = SCORING.per_die_banked.points
+const RESULT_DISPLAY = RULES.game.result_display
+const FACE_REVEAL_AFTER_FLOOR_CONTACT_SECONDS = RESULT_DISPLAY.face_reveal_after_floor_contact_seconds
 
 const DEFAULT_LANGUAGE = 'fr'
 const TRANSLATIONS = {
@@ -425,6 +427,7 @@ let canFinishRound = false
 let roundFinalized = false
 let roundBonusApplied = false
 let pendingRoundReset = false
+let elapsedGameSeconds = 0
 
 setDieMass(Number(massSlider.value))
 setThrowAltitudeAngle(Number(throwAngleSlider.value))
@@ -1075,6 +1078,7 @@ function createDie(x, z, index) {
     value: null,
     rolling: false,
     kept: false,
+    floorContactAtSeconds: null,
     aimOrientationLocked: false,
     defaultLinearDamping: body.linearDamping,
     defaultAngularDamping: body.angularDamping,
@@ -1179,6 +1183,7 @@ function beginHandAim(center) {
     const offset = getHandDiceOffset(index, activeDice.length)
     dieData.value = null
     dieData.rolling = false
+    dieData.floorContactAtSeconds = null
     dieData.mesh.visible = true
     dieData.aimOrientationLocked = false
     body.mass = getSimulatedDieMassKg()
@@ -1298,12 +1303,47 @@ function syncPhysics() {
   })
 }
 
+function isBodyTouchingFloor(body) {
+  return world.contacts.some((contact) =>
+    (contact.bi === body && contact.bj === floorBody) ||
+    (contact.bi === floorBody && contact.bj === body)
+  )
+}
+
+function updateDiceFloorContactTimes() {
+  dice.forEach((dieData) => {
+    if (dieData.kept || !dieData.rolling || dieData.floorContactAtSeconds != null) return
+    if (isBodyTouchingFloor(dieData.body)) {
+      dieData.floorContactAtSeconds = elapsedGameSeconds
+    }
+  })
+}
+
+function hasDieReachedFaceRevealDelay(dieData) {
+  return dieData.floorContactAtSeconds != null &&
+    elapsedGameSeconds - dieData.floorContactAtSeconds >= FACE_REVEAL_AFTER_FLOOR_CONTACT_SECONDS
+}
+
+function updateRealtimeDieFaceValues() {
+  let hasChanged = false
+  dice.forEach((dieData) => {
+    if (dieData.kept || !dieData.rolling || !hasDieReachedFaceRevealDelay(dieData)) return
+    const nextValue = determineDieFaceValue(dieData)
+    if (dieData.value !== nextValue) {
+      dieData.value = nextValue
+      hasChanged = true
+    }
+  })
+  if (hasChanged) renderDiceButtons()
+}
+
 function areRollingDiceSleeping() {
   return dice
     .filter((dieData) => !dieData.kept)
     .every((dieData) =>
       dieData.body.velocity.length() < 0.1 &&
       dieData.body.angularVelocity.length() < 0.1 &&
+      hasDieReachedFaceRevealDelay(dieData) &&
       isDieSettledOnFace(dieData)
     )
 }
@@ -1565,6 +1605,7 @@ function rollDice(launch) {
   activeDice.forEach((dieData) => {
     dieData.value = null
     dieData.rolling = true
+    dieData.floorContactAtSeconds = null
     applyDieImpulse(dieData, throwLaunch.direction, throwLaunch.forceRatio)
   })
 
@@ -1781,13 +1822,16 @@ function animate() {
   requestAnimationFrame(animate)
 
   const delta = clock.getDelta()
+  elapsedGameSeconds += delta
   if (aimInProgress && aimCurrentWorld) {
     moveHandAim(aimCurrentWorld)
     containAimedDiceInHandSphere()
   }
   world.step(timeStep, delta, 3)
   containAimedDiceInHandSphere()
+  updateDiceFloorContactTimes()
   syncPhysics()
+  updateRealtimeDieFaceValues()
   finalizeRollingDice()
   updateCameraFrame(delta)
 
