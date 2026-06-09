@@ -380,6 +380,13 @@ const clock = {
 }
 const timeStep = 1 / 60
 const FACE_SETTLE_DOT = 0.82
+// The scene uses centimetre-sized dice: each die is normalized to about
+// 1.2 cm across its widest dimension, keeping it inside the requested
+// 1 cm to 1.5 cm range while preserving each polyhedral shape.
+const DICE_TARGET_SIZE_CM = 1.2
+const DICE_MIN_SIZE_CM = 1
+const DICE_MAX_SIZE_CM = 1.5
+const D6_BEVEL_RATIO = 0.08
 const CAMERA_FALLBACK_RADIUS = 1.4
 const CAMERA_MARGIN = 1.12
 const CAMERA_PAN_MAX_FACTOR = 0.75
@@ -575,16 +582,22 @@ function createDieGeometry(faceCount) {
 
   switch (faceCount) {
     case 6: {
-      const geometry = new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
-      geometry.userData.physicsDefinition = createBeveledBoxDefinition(0.5, 0.08)
+      const size = DICE_TARGET_SIZE_CM
+      const bevel = size * D6_BEVEL_RATIO
+      const geometry = new RoundedBoxGeometry(size, size, size, 4, bevel)
+      geometry.userData.physicsDefinition = createBeveledBoxDefinition(size / 2, bevel)
       return geometry
     }
-    default:
-      return new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
+    default: {
+      const size = DICE_TARGET_SIZE_CM
+      const bevel = size * D6_BEVEL_RATIO
+      return new RoundedBoxGeometry(size, size, size, 4, bevel)
+    }
   }
 }
 
 function createPolyDieGeometry(definition, faceCount) {
+  validateDieSize(definition.sizeCm)
   const physicsDefinition = createBeveledPolyDieDefinition(definition, faceCount)
   const vertices = []
   for (const face of physicsDefinition.faces) {
@@ -758,16 +771,49 @@ function createBeveledBoxDefinition(halfSize, bevelRadius) {
 
 function buildPolyDieDefinition(vertices, faces) {
   const centeredVertices = centerVertices(vertices)
-  const orientedFaces = orientFacesOutward(centeredVertices, faces)
-  const faceNormals = orientedFaces.map(face => getFaceNormalFromVertexList(centeredVertices, face))
+  const scaledVertices = scaleVerticesToTargetSize(centeredVertices, DICE_TARGET_SIZE_CM)
+  const orientedFaces = orientFacesOutward(scaledVertices, faces)
+  const faceNormals = orientedFaces.map(face => getFaceNormalFromVertexList(scaledVertices, face))
   const faceDistances = orientedFaces.map((face, index) => (
-    Math.abs(faceNormals[index].dot(new THREE.Vector3(...centeredVertices[face[0]])))
+    Math.abs(faceNormals[index].dot(new THREE.Vector3(...scaledVertices[face[0]])))
   ))
   return {
-    vertices: centeredVertices,
+    vertices: scaledVertices,
     faces: orientedFaces,
     faceNormals,
     faceDistances,
+    sizeCm: getMaxDimension(scaledVertices),
+  }
+}
+
+function scaleVerticesToTargetSize(vertices, targetSize) {
+  const currentSize = getMaxDimension(vertices)
+  const scale = currentSize > 0 ? targetSize / currentSize : 1
+  return vertices.map(vertex => vertex.map(coordinate => coordinate * scale))
+}
+
+function getMaxDimension(vertices) {
+  const bounds = getVertexBounds(vertices)
+  return Math.max(
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2]
+  )
+}
+
+function getVertexBounds(vertices) {
+  return vertices.reduce((bounds, vertex) => ({
+    min: bounds.min.map((value, index) => Math.min(value, vertex[index])),
+    max: bounds.max.map((value, index) => Math.max(value, vertex[index])),
+  }), {
+    min: [Infinity, Infinity, Infinity],
+    max: [-Infinity, -Infinity, -Infinity],
+  })
+}
+
+function validateDieSize(sizeCm) {
+  if (sizeCm < DICE_MIN_SIZE_CM || sizeCm > DICE_MAX_SIZE_CM) {
+    throw new Error(`Die geometry size ${sizeCm.toFixed(2)} cm is outside the requested 1 cm to 1.5 cm range.`)
   }
 }
 
