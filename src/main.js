@@ -483,8 +483,9 @@ function updateTableTilt(delta) {
   tiltElapsedSeconds += delta
   const progress = Math.min(1, tiltElapsedSeconds / TILT_DURATION_SECONDS)
   const pulse = Math.sin(Math.PI * progress) ** TILT_SINE_POWER
-  const tiltX = tiltDirection.x * TILT_MAX_ANGLE_RADIANS * pulse
-  const tiltZ = tiltDirection.y * TILT_MAX_ANGLE_RADIANS * pulse
+  const anglePulse = pulse * Math.cos(progress * Math.PI * 2)
+  const tiltX = tiltDirection.x * TILT_MAX_ANGLE_RADIANS * anglePulse
+  const tiltZ = tiltDirection.y * TILT_MAX_ANGLE_RADIANS * anglePulse
   const normal = new THREE.Vector3(-Math.sin(tiltZ), Math.cos(tiltX) * Math.cos(tiltZ), Math.sin(tiltX))
   setFloorPose(normal, FLOOR_Y + TILT_MAX_HEIGHT_CM * pulse)
 
@@ -695,6 +696,7 @@ function startObjectiveReelSpin(indices) {
 function updateObjectiveReelAnimations() {
   if (!isObjectiveMode()) return
 
+  const hadSpinningReels = hasObjectiveReelsSpinning()
   let changed = false
   objectiveValues.forEach((value, index) => {
     if (!isObjectiveReelSpinning(index)) {
@@ -713,6 +715,10 @@ function updateObjectiveReelAnimations() {
   })
 
   if (changed) renderObjectiveReels()
+  if (hadSpinningReels && !hasObjectiveReelsSpinning()) {
+    updateObjectiveUI()
+    renderDiceButtons()
+  }
 }
 
 function renderObjectiveReels() {
@@ -836,7 +842,8 @@ function renderDiceButtons() {
   diceButtonsContainer.innerHTML = ''
 
   const keepable = getKeepableDice()
-  const objectiveMatchedDice = getObjectiveMatchedDieIndices()
+  const canShowObjectiveMatches = isObjectiveMode() && !hasObjectiveReelsSpinning()
+  const objectiveMatchedDice = canShowObjectiveMatches ? getObjectiveMatchedDieIndices() : new Set()
 
   dice.forEach((dieData, index) => {
     dieData.mesh.visible = !dieData.kept
@@ -855,8 +862,8 @@ function renderDiceButtons() {
     button.style.borderColor = `#${dieData.color.toString(16).padStart(6, '0')}`
     button.classList.toggle('kept', dieData.kept)
     button.classList.toggle('rolling', dieData.rolling)
-    button.classList.toggle('objective-match', isObjectiveMode() && objectiveMatchedDice.has(index))
-    button.classList.toggle('objective-miss', isObjectiveMode() && dieData.value != null && !objectiveMatchedDice.has(index))
+    button.classList.toggle('objective-match', canShowObjectiveMatches && objectiveMatchedDice.has(index))
+    button.classList.toggle('objective-miss', canShowObjectiveMatches && dieData.value != null && !objectiveMatchedDice.has(index))
     if (!keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS) {
       button.classList.add('disabled')
     }

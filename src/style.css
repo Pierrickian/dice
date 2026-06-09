@@ -59,8 +59,8 @@ body,
   background: rgba(18, 20, 34, 0.9);
   border-radius: 14px;
   color: white;
-  font-size: 1rem;
-  font-weight: 800;
+  font-size: clamp(1.05rem, 3vw, 1.45rem);
+  font-weight: 900;
   cursor: pointer;
   pointer-events: auto;
   z-index: 31;
@@ -158,39 +158,48 @@ body,
 
 #roll-panel {
   position: absolute;
-  top: 70px;
-  right: 16px;
-  width: min(260px, calc(100vw - 32px));
+  top: 86px;
+  left: 50%;
+  width: min(720px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
   gap: 12px;
   pointer-events: auto;
+  transform: translateX(-50%);
   z-index: 10;
 }
 
 #roll-header {
-  font-size: 0.95rem;
-  color: #e8e8f0;
+  align-self: center;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(18, 20, 34, 0.54);
+  color: #f7f7fb;
+  font-size: clamp(1rem, 2.4vw, 1.35rem);
+  font-weight: 750;
+  letter-spacing: 0.01em;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(14px);
 }
 
 .dice-buttons {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .dice-value-button {
   width: 100%;
-  min-height: 56px;
-  border: 3px solid transparent;
-  border-radius: 16px;
+  min-height: clamp(56px, 11vw, 76px);
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-radius: 20px;
   color: white;
-  font-size: 1rem;
-  font-weight: 800;
+  font-size: clamp(1.05rem, 3vw, 1.45rem);
+  font-weight: 900;
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
 }
 
 .dice-value-button.kept {
@@ -226,14 +235,16 @@ body,
 }
 
 #roll-controls {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
 #roll-controls button {
   flex: 1;
-  padding: 14px 16px;
-  border-radius: 16px;
+  min-height: 48px;
+  padding: 12px 16px;
+  border-radius: 18px;
   border: none;
   background: rgba(255, 255, 255, 0.12);
   color: white;
@@ -267,12 +278,13 @@ body,
 #objective-panel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px;
+  gap: 12px;
+  padding: clamp(14px, 3vw, 20px);
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 16px;
-  background: rgba(18, 20, 34, 0.84);
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(18, 20, 34, 0.9), rgba(13, 15, 28, 0.78));
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px);
 }
 
 #objective-panel[hidden] {
@@ -288,30 +300,34 @@ body,
 }
 
 #objective-row {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
 }
 
 #objective-values {
+  min-width: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: clamp(4px, 1.2vw, 8px);
 }
 
 .objective-reel {
-  min-width: 2.1rem;
-  height: 2.4rem;
+  min-width: 0;
+  width: clamp(1.85rem, 8vw, 3rem);
+  height: clamp(2.25rem, 9vw, 3.35rem);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07));
   color: #ffffff;
-  font-size: 1.35rem;
-  font-weight: 900;
-  box-shadow: inset 0 -10px 18px rgba(0, 0, 0, 0.16), 0 8px 18px rgba(0, 0, 0, 0.18);
+  font-size: clamp(1.35rem, 4.8vw, 2rem);
+  font-weight: 950;
+  box-shadow: inset 0 -12px 20px rgba(0, 0, 0, 0.18), 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 
 .objective-reel.spinning {
@@ -320,14 +336,16 @@ body,
 }
 
 #objective-reroll-button {
-  flex: 0 0 auto;
-  padding: 9px 10px;
+  min-height: clamp(2.25rem, 9vw, 3.35rem);
+  padding: 0 clamp(10px, 2.4vw, 18px);
   border: none;
-  border-radius: 10px;
-  background: rgba(255, 215, 0, 0.9);
-  color: #231807;
-  font-size: 0.76rem;
-  font-weight: 900;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ffe05a, #f4b000);
+  color: #211700;
+  font-size: clamp(0.72rem, 2.4vw, 0.95rem);
+  font-weight: 950;
+  white-space: nowrap;
+  box-shadow: 0 12px 28px rgba(244, 176, 0, 0.24);
   cursor: pointer;
 }
 
@@ -353,8 +371,8 @@ body,
 
 #objective-status {
   color: #ffd700;
-  font-size: 0.84rem;
-  font-weight: 700;
+  font-size: clamp(0.9rem, 2.4vw, 1rem);
+  font-weight: 850;
 }
 
 #objective-panel.complete {
@@ -491,5 +509,22 @@ body,
   100% {
     opacity: 0;
     transform: scale(1) translateY(-70px);
+  }
+}
+
+@media (max-width: 420px) {
+  #roll-panel {
+    top: 82px;
+    gap: 10px;
+  }
+
+  #objective-row {
+    gap: 8px;
+  }
+
+  #objective-reroll-button {
+    max-width: 6.4rem;
+    white-space: normal;
+    line-height: 1.05;
   }
 }
