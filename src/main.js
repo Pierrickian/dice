@@ -582,7 +582,6 @@ scene.add(handSphere)
 
 function getKeepableDice() {
   if (isObjectiveMode()) {
-    if (hasObjectiveReelsSpinning()) return new Set()
     return getObjectiveMatchedDieIndices()
   }
   const values = dice.map(d => d.value)
