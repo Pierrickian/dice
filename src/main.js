@@ -380,19 +380,40 @@ const clock = {
 }
 const timeStep = 1 / 60
 const FACE_SETTLE_DOT = 0.82
+// The scene uses centimetre-sized dice: each die is normalized to about
+// 1.2 cm across its widest dimension, keeping it inside the requested
+// 1 cm to 1.5 cm range while preserving each polyhedral shape.
+const DICE_TARGET_SIZE_CM = 1.2
+const DICE_MIN_SIZE_CM = 1
+const DICE_MAX_SIZE_CM = 1.5
+const D6_BEVEL_RATIO = 0.08
+const D6_FACE_NORMALS = [
+  { value: 1, normal: new THREE.Vector3(0, 1, 0) },
+  { value: 2, normal: new THREE.Vector3(0, 0, 1) },
+  { value: 3, normal: new THREE.Vector3(1, 0, 0) },
+  { value: 4, normal: new THREE.Vector3(-1, 0, 0) },
+  { value: 5, normal: new THREE.Vector3(0, 0, -1) },
+  { value: 6, normal: new THREE.Vector3(0, -1, 0) },
+]
 const CAMERA_FALLBACK_RADIUS = 1.4
 const CAMERA_MARGIN = 1.12
 const CAMERA_PAN_MAX_FACTOR = 0.75
-const D6_CLUSTER_SPACING = 1.18
-const POLY_DICE_CLUSTER_SPACING = 2.15
 const MAX_DRAG_DISTANCE = 2.8
 const AIM_SUSPEND_HEIGHT = 2.15
+const HAND_RADIUS = 2.05
+const HAND_DAMPING = 0.58
+const HAND_ANGULAR_DAMPING = 0.62
+const HAND_MAX_DICE_SPEED = 1.05
+const HAND_MAX_ANGULAR_SPEED = 4.5
+const HAND_BOUNDARY_RESTITUTION = 0.08
 
 let dice = []
 let rollInProgress = false
 let aimInProgress = false
 let aimStartWorld = null
 let aimCurrentWorld = null
+let handSphereCenter = null
+let handSphereRadius = HAND_RADIUS
 let activePointerId = null
 let pendingAimTimer = null
 let pendingAimData = null
@@ -407,6 +428,20 @@ let pendingRoundReset = false
 
 setDieMass(Number(massSlider.value))
 setThrowAltitudeAngle(Number(throwAngleSlider.value))
+
+const handSphere = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 32, 18),
+  new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.16,
+    roughness: 0.3,
+    metalness: 0.05,
+    depthWrite: false,
+  })
+)
+handSphere.visible = false
+scene.add(handSphere)
 
 function getKeepableDice() {
   const values = dice.map(d => d.value)
@@ -575,16 +610,23 @@ function createDieGeometry(faceCount) {
 
   switch (faceCount) {
     case 6: {
-      const geometry = new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
-      geometry.userData.physicsDefinition = createBeveledBoxDefinition(0.5, 0.08)
+      const size = DICE_TARGET_SIZE_CM
+      const bevel = size * D6_BEVEL_RATIO
+      const geometry = new RoundedBoxGeometry(size, size, size, 4, bevel)
+      geometry.userData.physicsDefinition = createBeveledBoxDefinition(size / 2, bevel)
+      geometry.userData.faceNormals = D6_FACE_NORMALS
       return geometry
     }
-    default:
-      return new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
+    default: {
+      const size = DICE_TARGET_SIZE_CM
+      const bevel = size * D6_BEVEL_RATIO
+      return new RoundedBoxGeometry(size, size, size, 4, bevel)
+    }
   }
 }
 
 function createPolyDieGeometry(definition, faceCount) {
+  validateDieSize(definition.sizeCm)
   const physicsDefinition = createBeveledPolyDieDefinition(definition, faceCount)
   const vertices = []
   for (const face of physicsDefinition.faces) {
@@ -758,16 +800,49 @@ function createBeveledBoxDefinition(halfSize, bevelRadius) {
 
 function buildPolyDieDefinition(vertices, faces) {
   const centeredVertices = centerVertices(vertices)
-  const orientedFaces = orientFacesOutward(centeredVertices, faces)
-  const faceNormals = orientedFaces.map(face => getFaceNormalFromVertexList(centeredVertices, face))
+  const scaledVertices = scaleVerticesToTargetSize(centeredVertices, DICE_TARGET_SIZE_CM)
+  const orientedFaces = orientFacesOutward(scaledVertices, faces)
+  const faceNormals = orientedFaces.map(face => getFaceNormalFromVertexList(scaledVertices, face))
   const faceDistances = orientedFaces.map((face, index) => (
-    Math.abs(faceNormals[index].dot(new THREE.Vector3(...centeredVertices[face[0]])))
+    Math.abs(faceNormals[index].dot(new THREE.Vector3(...scaledVertices[face[0]])))
   ))
   return {
-    vertices: centeredVertices,
+    vertices: scaledVertices,
     faces: orientedFaces,
     faceNormals,
     faceDistances,
+    sizeCm: getMaxDimension(scaledVertices),
+  }
+}
+
+function scaleVerticesToTargetSize(vertices, targetSize) {
+  const currentSize = getMaxDimension(vertices)
+  const scale = currentSize > 0 ? targetSize / currentSize : 1
+  return vertices.map(vertex => vertex.map(coordinate => coordinate * scale))
+}
+
+function getMaxDimension(vertices) {
+  const bounds = getVertexBounds(vertices)
+  return Math.max(
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2]
+  )
+}
+
+function getVertexBounds(vertices) {
+  return vertices.reduce((bounds, vertex) => ({
+    min: bounds.min.map((value, index) => Math.min(value, vertex[index])),
+    max: bounds.max.map((value, index) => Math.max(value, vertex[index])),
+  }), {
+    min: [Infinity, Infinity, Infinity],
+    max: [-Infinity, -Infinity, -Infinity],
+  })
+}
+
+function validateDieSize(sizeCm) {
+  if (sizeCm < DICE_MIN_SIZE_CM || sizeCm > DICE_MAX_SIZE_CM) {
+    throw new Error(`Die geometry size ${sizeCm.toFixed(2)} cm is outside the requested 1 cm to 1.5 cm range.`)
   }
 }
 
@@ -1001,6 +1076,8 @@ function createDie(x, z, index) {
     rolling: false,
     kept: false,
     aimOrientationLocked: false,
+    defaultLinearDamping: body.linearDamping,
+    defaultAngularDamping: body.angularDamping,
     index,
   }
 }
@@ -1074,61 +1151,111 @@ function getRollableDice() {
   return dice.filter(dieData => !dieData.kept || currentRoll === 0)
 }
 
-function getClusterOffset(index, count) {
+function getHandDiceOffset(index, count) {
   if (count <= 1) return new THREE.Vector3(0, 0, 0)
   const angle = (index / count) * Math.PI * 2
-  const spacing = currentFaces === 6 ? D6_CLUSTER_SPACING : POLY_DICE_CLUSTER_SPACING
+  const ringRadius = Math.min(HAND_RADIUS * 0.32, HAND_RADIUS - DICE_TARGET_SIZE_CM * 0.75)
   return new THREE.Vector3(
-    Math.cos(angle) * spacing,
-    0,
-    Math.sin(angle) * spacing
+    Math.cos(angle) * ringRadius,
+    (index % 2) * 0.12 - 0.06,
+    Math.sin(angle) * ringRadius
   )
 }
 
-function placeDieForAiming(dieData, center, clusterIndex, activeCount, suspended = false) {
-  const body = dieData.body
-  body.velocity.set(0, 0, 0)
-  body.angularVelocity.set(0, 0, 0)
-  const offset = getClusterOffset(clusterIndex, activeCount)
-  body.position.set(
-    center.x + offset.x,
-    FLOOR_Y + (suspended ? AIM_SUSPEND_HEIGHT : 0.82) + (suspended ? 0 : Math.random() * 0.12),
-    center.z + offset.z
-  )
-  if (!suspended || !dieData.aimOrientationLocked) {
-    body.quaternion.set(
-      Math.random(),
-      Math.random(),
-      Math.random(),
-      Math.random()
-    )
-    body.quaternion.normalize()
-    dieData.aimOrientationLocked = suspended
-  }
-  body.type = suspended ? CANNON.Body.STATIC : CANNON.Body.DYNAMIC
-  body.collisionResponse = !suspended
-  body.wakeUp()
+function updateHandSphere(center) {
+  handSphereCenter = center.clone()
+  handSphereCenter.y = FLOOR_Y + AIM_SUSPEND_HEIGHT
+  handSphereRadius = HAND_RADIUS
+  handSphere.position.copy(handSphereCenter)
+  handSphere.scale.setScalar(handSphereRadius)
+  handSphere.visible = true
 }
 
-function placeRollableDice(center, suspended = false) {
+function beginHandAim(center) {
   const activeDice = getRollableDice()
+  updateHandSphere(center)
   activeDice.forEach((dieData, index) => {
+    const body = dieData.body
+    const offset = getHandDiceOffset(index, activeDice.length)
     dieData.value = null
     dieData.rolling = false
     dieData.mesh.visible = true
-    placeDieForAiming(dieData, center, index, activeDice.length, suspended)
+    dieData.aimOrientationLocked = false
+    body.mass = getSimulatedDieMassKg()
+    body.type = CANNON.Body.DYNAMIC
+    body.collisionResponse = true
+    body.linearDamping = HAND_DAMPING
+    body.angularDamping = HAND_ANGULAR_DAMPING
+    body.position.set(
+      handSphereCenter.x + offset.x,
+      handSphereCenter.y + offset.y,
+      handSphereCenter.z + offset.z
+    )
+    body.velocity.set(0, 0, 0)
+    body.updateMassProperties()
+    body.wakeUp()
   })
   syncPhysics()
   renderDiceButtons()
 }
 
+function moveHandAim(center) {
+  if (!handSphereCenter) {
+    updateHandSphere(center)
+    return
+  }
+  updateHandSphere(center)
+}
+
+function containAimedDiceInHandSphere() {
+  if (!aimInProgress || !handSphereCenter) return
+
+  const maxDistance = Math.max(0.28, handSphereRadius - DICE_TARGET_SIZE_CM * 0.55)
+  const center = new CANNON.Vec3(handSphereCenter.x, handSphereCenter.y, handSphereCenter.z)
+  getRollableDice().forEach((dieData) => {
+    const body = dieData.body
+    const fromCenter = body.position.vsub(center)
+    const distance = fromCenter.length()
+
+    if (distance > maxDistance) {
+      const normal = fromCenter.scale(1 / Math.max(distance, 0.0001))
+      body.position.copy(center.vadd(normal.scale(maxDistance)))
+      const outwardSpeed = body.velocity.dot(normal)
+      if (outwardSpeed > 0) {
+        body.velocity.vsub(normal.scale(outwardSpeed * (1 + HAND_BOUNDARY_RESTITUTION)), body.velocity)
+      }
+    }
+
+    limitAimedDieVelocity(body)
+  })
+}
+
+function limitAimedDieVelocity(body) {
+  if (body.velocity.length() > HAND_MAX_DICE_SPEED) {
+    body.velocity.normalize()
+    body.velocity.scale(HAND_MAX_DICE_SPEED, body.velocity)
+  }
+  if (body.angularVelocity.length() > HAND_MAX_ANGULAR_SPEED) {
+    body.angularVelocity.normalize()
+    body.angularVelocity.scale(HAND_MAX_ANGULAR_SPEED, body.angularVelocity)
+  }
+}
+
+function hideHandSphere() {
+  handSphere.visible = false
+  handSphereCenter = null
+}
+
 function releaseAimedDice() {
+  hideHandSphere()
   const activeDice = getRollableDice()
   activeDice.forEach((dieData) => {
     dieData.aimOrientationLocked = false
     dieData.body.mass = getSimulatedDieMassKg()
     dieData.body.type = CANNON.Body.DYNAMIC
     dieData.body.collisionResponse = true
+    dieData.body.linearDamping = dieData.defaultLinearDamping
+    dieData.body.angularDamping = dieData.defaultAngularDamping
     dieData.body.updateMassProperties()
     dieData.body.wakeUp()
   })
@@ -1181,9 +1308,26 @@ function areRollingDiceSleeping() {
     )
 }
 
+function getDieFaceNormals(dieData) {
+  return dieData.mesh.geometry.userData.faceNormals || []
+}
+
+function wakeUpBodyTiltAngle(dieData) {
+  const body = dieData.body
+  if (body.velocity.length() >= 0.08 || body.angularVelocity.length() >= 0.08) return
+
+  body.wakeUp()
+  // Keep this tilt wake-up: it helps dice leave edge/chamfer stalls and settle flat on a face.
+  body.angularVelocity.set(
+    body.angularVelocity.x + (Math.random() - 0.5) * 1.2,
+    body.angularVelocity.y,
+    body.angularVelocity.z + (Math.random() - 0.5) * 1.2
+  )
+}
+
 function isDieSettledOnFace(dieData) {
-  const faceNormals = dieData.mesh.geometry.userData.faceNormals
-  if (!faceNormals) return true
+  const faceNormals = getDieFaceNormals(dieData)
+  if (faceNormals.length === 0) return true
 
   const down = new THREE.Vector3(0, -1, 0)
   let bestDot = -Infinity
@@ -1194,45 +1338,17 @@ function isDieSettledOnFace(dieData) {
 
   if (bestDot >= FACE_SETTLE_DOT) return true
 
-  const body = dieData.body
-  if (body.velocity.length() < 0.08 && body.angularVelocity.length() < 0.08) {
-    body.wakeUp()
-    body.angularVelocity.set(
-      body.angularVelocity.x + (Math.random() - 0.5) * 1.2,
-      body.angularVelocity.y,
-      body.angularVelocity.z + (Math.random() - 0.5) * 1.2
-    )
-  }
+  wakeUpBodyTiltAngle(dieData)
   return false
 }
 
 function determineDieFaceValue(dieData) {
   const up = new THREE.Vector3(0, 1, 0)
-  if (currentFaces === 6) {
-    const axes = [
-      { value: 1, normal: new THREE.Vector3(0, 1, 0) },
-      { value: 2, normal: new THREE.Vector3(0, 0, 1) },
-      { value: 3, normal: new THREE.Vector3(1, 0, 0) },
-      { value: 4, normal: new THREE.Vector3(-1, 0, 0) },
-      { value: 5, normal: new THREE.Vector3(0, 0, -1) },
-      { value: 6, normal: new THREE.Vector3(0, -1, 0) },
-    ]
-    let bestValue = 1
-    let bestScore = -Infinity
-    for (const entry of axes) {
-      const score = entry.normal.clone().applyQuaternion(dieData.mesh.quaternion).dot(up)
-      if (score > bestScore) {
-        bestScore = score
-        bestValue = entry.value
-      }
-    }
-    return bestValue
-  }
-  const geometry = dieData.mesh.geometry
-  if (geometry.userData.faceNormals) {
+  const faceNormals = getDieFaceNormals(dieData)
+  if (faceNormals.length > 0) {
     let bestValue = 1
     let bestDot = -Infinity
-    for (const entry of geometry.userData.faceNormals) {
+    for (const entry of faceNormals) {
       const dot = entry.normal.clone().applyQuaternion(dieData.mesh.quaternion).dot(up)
       if (dot > bestDot) {
         bestDot = dot
@@ -1241,6 +1357,7 @@ function determineDieFaceValue(dieData) {
     }
     return bestValue
   }
+  const geometry = dieData.mesh.geometry
   const position = geometry.attributes.position
   const normals = []
   const normal = new THREE.Vector3()
@@ -1508,7 +1625,7 @@ function startAimFromPointer(pointerData) {
   aimCurrentWorld = floorPoint.clone()
   dragStartScreen.set(pointerData.clientX, pointerData.clientY)
   dragCurrentScreen.copy(dragStartScreen)
-  placeRollableDice(aimStartWorld, true)
+  beginHandAim(aimStartWorld)
   updateAimIndicator(dragStartScreen, dragCurrentScreen)
 }
 
@@ -1568,7 +1685,7 @@ function updateAim(event) {
   if (!aimInProgress || event.pointerId !== activePointerId) return
   const floorPoint = getFloorPointFromPointer(event)
   if (floorPoint) aimCurrentWorld = floorPoint.clone()
-  placeRollableDice(aimCurrentWorld, true)
+  moveHandAim(aimCurrentWorld)
   dragCurrentScreen.set(event.clientX, event.clientY)
   updateAimIndicator(dragStartScreen, dragCurrentScreen)
 }
@@ -1589,7 +1706,7 @@ function finishAim(event) {
   if (!aimInProgress || event.pointerId !== activePointerId) return
   const floorPoint = getFloorPointFromPointer(event)
   if (floorPoint) aimCurrentWorld = floorPoint.clone()
-  placeRollableDice(aimCurrentWorld, true)
+  moveHandAim(aimCurrentWorld)
   const launch = getLaunchFromDrag(aimStartWorld, aimCurrentWorld)
   aimInProgress = false
   activePointerId = null
@@ -1664,10 +1781,12 @@ function animate() {
   requestAnimationFrame(animate)
 
   const delta = clock.getDelta()
-  world.step(timeStep, delta, 3)
   if (aimInProgress && aimCurrentWorld) {
-    placeRollableDice(aimCurrentWorld, true)
+    moveHandAim(aimCurrentWorld)
+    containAimedDiceInHandSphere()
   }
+  world.step(timeStep, delta, 3)
+  containAimedDiceInHandSphere()
   syncPhysics()
   finalizeRollingDice()
   updateCameraFrame(delta)
