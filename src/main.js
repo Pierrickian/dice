@@ -841,8 +841,8 @@ function renderDiceButtons() {
   diceButtonsContainer.innerHTML = ''
 
   const keepable = getKeepableDice()
-  const canShowObjectiveMatches = isObjectiveMode() && !hasObjectiveReelsSpinning()
-  const objectiveMatchedDice = canShowObjectiveMatches ? getObjectiveMatchedDieIndices() : new Set()
+  const isObjectiveReelSettled = isObjectiveMode() && !hasObjectiveReelsSpinning()
+  const objectiveMatchedDice = isObjectiveMode() ? getObjectiveMatchedDieIndices() : new Set()
 
   dice.forEach((dieData, index) => {
     dieData.mesh.visible = !dieData.kept
@@ -861,10 +861,10 @@ function renderDiceButtons() {
     button.style.borderColor = `#${dieData.color.toString(16).padStart(6, '0')}`
     button.classList.toggle('kept', dieData.kept)
     button.classList.toggle('rolling', dieData.rolling)
-    button.classList.toggle('objective-match', canShowObjectiveMatches && objectiveMatchedDice.has(index))
-    button.classList.toggle('objective-miss', canShowObjectiveMatches && dieData.value != null && !objectiveMatchedDice.has(index))
+    button.classList.toggle('objective-match', isObjectiveReelSettled && objectiveMatchedDice.has(index))
+    button.classList.toggle('objective-miss', isObjectiveMode() && dieData.value != null && !objectiveMatchedDice.has(index))
     const isDisabledResult = isObjectiveMode()
-      ? canShowObjectiveMatches && dieData.value != null && !objectiveMatchedDice.has(index)
+      ? dieData.value != null && !objectiveMatchedDice.has(index)
       : !keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS
     if (isDisabledResult) button.classList.add('disabled')
 
