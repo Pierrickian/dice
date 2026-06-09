@@ -43,7 +43,7 @@ body,
   border-radius: 14px;
   cursor: pointer;
   pointer-events: auto;
-  z-index: 4;
+  z-index: 31;
 }
 
 #tuning-button,
@@ -63,7 +63,7 @@ body,
   font-weight: 800;
   cursor: pointer;
   pointer-events: auto;
-  z-index: 4;
+  z-index: 31;
 }
 
 #tuning-button {
@@ -106,6 +106,7 @@ body,
   border-radius: 18px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
   pointer-events: auto;
+  z-index: 30;
 }
 
 #menu-panel.open {
@@ -126,7 +127,7 @@ body,
   border-radius: 18px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
   pointer-events: auto;
-  z-index: 3;
+  z-index: 30;
 }
 
 #tuning-panel.open {
@@ -164,6 +165,7 @@ body,
   flex-direction: column;
   gap: 12px;
   pointer-events: auto;
+  z-index: 10;
 }
 
 #roll-header {
@@ -234,6 +236,11 @@ body,
   color: #c8c8d0;
 }
 
+#tilt-button {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.9), rgba(244, 162, 97, 0.9));
+  color: #231807;
+}
+
 #roll-controls button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -244,6 +251,50 @@ body,
   color: #ffd700;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   font-weight: bold;
+}
+
+#objective-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(18, 20, 34, 0.84);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+}
+
+#objective-panel[hidden] {
+  display: none;
+}
+
+#objective-title {
+  font-size: 0.78rem;
+  color: #c8c8d0;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+#objective-values {
+  color: #ffffff;
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+#objective-status {
+  color: #ffd700;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+#objective-panel.complete {
+  border-color: rgba(90, 214, 139, 0.8);
+  box-shadow: 0 0 24px rgba(90, 214, 139, 0.28);
+}
+
+#objective-panel.complete #objective-status {
+  color: #5ad68b;
 }
 
 #friction-control,

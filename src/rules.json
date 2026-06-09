@@ -2,21 +2,65 @@
   "game": {
     "name": "Dice Game",
     "description": "Each round, the player rolls a set of dice up to 3 times. After each roll, they can bank (keep) certain dice based on the combinations they form. The goal is to accumulate points across multiple rounds.",
-
     "configuration": {
       "description": "Settings the player can change before or between rounds.",
       "dice_count": {
         "description": "How many dice are rolled each round.",
-        "allowed_values": [1, 2, 3, 4, 5, 6],
+        "allowed_values": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
         "default": 4
       },
       "dice_faces": {
         "description": "The number of faces on each die. All dice in a round share the same face count.",
-        "allowed_values": [4, 6, 8, 10, 12, 20],
+        "allowed_values": [
+          4,
+          6,
+          8,
+          10,
+          12,
+          20
+        ],
         "default": 6
       }
     },
-
+    "rule_modes": {
+      "description": "The player can choose the active rule set from the menu. Zerotonine preserves the original banking and scoring rules; Random Objective asks the player to roll a target multiset of face values without assigning colors to dice.",
+      "default": "zerotonine",
+      "modes": [
+        {
+          "id": "zerotonine",
+          "name": "Zerotonine",
+          "description": "Original game rule: bank eligible dice based on combinations, score banked dice, and use early-finish bonuses.",
+          "engine": {
+            "type": "banking_score"
+          }
+        },
+        {
+          "id": "random_objective",
+          "name": "Random objective",
+          "description": "At the start of each round, generate a random objective made only of die face values. Dice colors are ignored; any dice can satisfy any target value.",
+          "engine": {
+            "type": "random_face_multiset"
+          }
+        }
+      ]
+    },
+    "objective_rules": {
+      "description": "Rules for the random objective mode. The target contains one required value per die and compares values as an unordered multiset.",
+      "engine": {
+        "type": "random_face_multiset",
+        "use_current_dice_count": true,
+        "use_current_face_count": true,
+        "match_order": "any",
+        "ignore_die_colors": true
+      }
+    },
     "round_structure": {
       "description": "A round is made up of up to 3 rolls. The player clicks the 3D scene to trigger each roll.",
       "max_rolls_per_round": 3,
@@ -54,12 +98,18 @@
         "next_action": "The player clicks the scene to confirm and move to the next round."
       }
     },
-
     "result_display": {
       "description": "During a roll, each die reveals the face currently pointing most upward only after that die has touched the floor for the configured delay.",
       "face_reveal_after_floor_contact_seconds": 0.7
     },
-
+    "table_tilt": {
+      "description": "During each roll, the player may tilt the table once while at least one die is still moving. The tilt is a short narrow sine pulse applied to the table height and angle.",
+      "uses_per_roll": 1,
+      "duration_seconds": 0.65,
+      "max_angle_degrees": 7,
+      "max_height_cm": 0.22,
+      "sine_power": 3
+    },
     "banking_rules": {
       "description": "After each roll, only certain dice are eligible to be banked. A die must match at least one condition below. After the final roll, all dice become eligible regardless of combinations.",
       "note_on_third_roll": "On the final roll (3/3), all dice become selectable — no combination is required.",
@@ -119,7 +169,6 @@
         }
       ]
     },
-
     "scoring": {
       "description": "Points are awarded during and at the end of each round.",
       "per_die_banked": {

@@ -13,28 +13,60 @@ const SCORE_RESET_THRESHOLD = SCORING.score_reset.threshold
 const POINTS_PER_DIE = SCORING.per_die_banked.points
 const RESULT_DISPLAY = RULES.game.result_display
 const FACE_REVEAL_AFTER_FLOOR_CONTACT_SECONDS = RESULT_DISPLAY.face_reveal_after_floor_contact_seconds
+const RULE_MODES = RULES.game.rule_modes
+const OBJECTIVE_RULES = RULES.game.objective_rules.engine
+const TABLE_TILT = RULES.game.table_tilt
+const DEFAULT_RULE_MODE = RULE_MODES.default
+const OBJECTIVE_MODE_ID = RULE_MODES.modes.find(mode => mode.engine.type === OBJECTIVE_RULES.type)?.id
+const TILT_USES_PER_ROLL = TABLE_TILT.uses_per_roll
+const TILT_DURATION_SECONDS = TABLE_TILT.duration_seconds
+const TILT_MAX_ANGLE_RADIANS = THREE.MathUtils.degToRad(TABLE_TILT.max_angle_degrees)
+const TILT_MAX_HEIGHT_CM = TABLE_TILT.max_height_cm
+const TILT_SINE_POWER = TABLE_TILT.sine_power
 
 const DEFAULT_LANGUAGE = 'fr'
 const TRANSLATIONS = {
   fr: {
     diceCountLabel: 'Nombre de dés',
     diceFacesLabel: 'Nombre de faces',
+    ruleModeLabel: 'Règle',
     menuLabel: 'Menu',
     resetButton: 'Réinitialiser',
+    tiltButton: 'Tilter la table',
     toggleLanguageLabel: 'Passer en anglais',
     toggleLanguageFlag: '🇬🇧',
     rollHeader: (current, max) => `Lancer ${current} / ${max}`,
     scoreDisplay: score => `Score : ${score}`,
+    objectiveTitle: 'Objectif',
+    objectiveWaiting: 'Lance les dés pour tenter cette combinaison.',
+    objectiveSuccess: 'Objectif réussi !',
+    objectiveProgress: 'Objectif en cours…',
+    objectiveValues: values => values.join(' · '),
+    ruleModeNames: {
+      zerotonine: 'Zerotonine',
+      random_objective: 'Objectif aléatoire',
+    },
   },
   en: {
     diceCountLabel: 'Number of dice',
     diceFacesLabel: 'Number of sides',
+    ruleModeLabel: 'Rule',
     menuLabel: 'Menu',
     resetButton: 'Reset',
+    tiltButton: 'Tilt table',
     toggleLanguageLabel: 'Switch to French',
     toggleLanguageFlag: '🇫🇷',
     rollHeader: (current, max) => `Roll ${current} / ${max}`,
     scoreDisplay: score => `Score: ${score}`,
+    objectiveTitle: 'Objective',
+    objectiveWaiting: 'Roll the dice to attempt this combination.',
+    objectiveSuccess: 'Objective complete!',
+    objectiveProgress: 'Objective in progress…',
+    objectiveValues: values => values.join(' · '),
+    ruleModeNames: {
+      zerotonine: 'Zerotonine',
+      random_objective: 'Random objective',
+    },
   },
 }
 let currentLanguage = DEFAULT_LANGUAGE
@@ -154,6 +186,13 @@ app.innerHTML = `
           <option value="20">20</option>
         </select>
       </div>
+      <div class="control-row">
+        <label id="rule-mode-label" for="rule-mode">Règle</label>
+        <select id="rule-mode">
+          <option value="zerotonine" selected>Zerotonine</option>
+          <option value="random_objective">Objectif aléatoire</option>
+        </select>
+      </div>
     </div>
     <div id="tuning-panel">
       <div id="friction-control">
@@ -185,8 +224,14 @@ app.innerHTML = `
     <div id="roll-panel">
       <div id="roll-header">Lancer 1 / 3</div>
       <div id="score-display">Score : 0</div>
+      <div id="objective-panel" hidden>
+        <div id="objective-title">Objectif</div>
+        <div id="objective-values"></div>
+        <div id="objective-status"></div>
+      </div>
       <div id="dice-buttons" class="dice-buttons"></div>
       <div id="roll-controls">
+        <button id="tilt-button" type="button">Tilter la table</button>
         <button id="reset-button" type="button" class="secondary">Réinitialiser</button>
       </div>
     </div>
@@ -199,6 +244,7 @@ app.innerHTML = `
 const canvas = document.querySelector('#bg')
 const diceCountSelect = document.querySelector('#dice-count')
 const diceFacesSelect = document.querySelector('#dice-faces')
+const ruleModeSelect = document.querySelector('#rule-mode')
 const menuButton = document.querySelector('#menu-button')
 const menuPanel = document.querySelector('#menu-panel')
 const tuningButton = document.querySelector('#tuning-button')
@@ -206,10 +252,16 @@ const tuningPanel = document.querySelector('#tuning-panel')
 const languageToggle = document.querySelector('#language-toggle')
 const diceCountLabel = document.querySelector('#dice-count-label')
 const diceFacesLabel = document.querySelector('#dice-faces-label')
+const ruleModeLabel = document.querySelector('#rule-mode-label')
 const rollHeader = document.querySelector('#roll-header')
 const diceButtonsContainer = document.querySelector('#dice-buttons')
 const resetButton = document.querySelector('#reset-button')
+const tiltButton = document.querySelector('#tilt-button')
 const scoreDisplay = document.querySelector('#score-display')
+const objectivePanel = document.querySelector('#objective-panel')
+const objectiveTitle = document.querySelector('#objective-title')
+const objectiveValuesDisplay = document.querySelector('#objective-values')
+const objectiveStatus = document.querySelector('#objective-status')
 const scoreAnimations = document.querySelector('#score-animations')
 const frictionSlider = document.querySelector('#friction-slider')
 const frictionValue = document.querySelector('#friction-value')
@@ -371,6 +423,69 @@ const floorBody = new CANNON.Body({
 floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0)
 world.addBody(floorBody)
 
+function setFloorPose(normal = new THREE.Vector3(0, 1, 0), height = FLOOR_Y) {
+  const floorQuaternion = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 0, 1),
+    normal.clone().normalize()
+  )
+  floor.quaternion.copy(floorQuaternion)
+  floor.position.y = height
+  floorBody.quaternion.set(floorQuaternion.x, floorQuaternion.y, floorQuaternion.z, floorQuaternion.w)
+  floorBody.position.y = height
+  floorBody.aabbNeedsUpdate = true
+}
+
+function getMovingRollingDice() {
+  return dice.filter((dieData) =>
+    !dieData.kept &&
+    dieData.rolling &&
+    (dieData.body.velocity.length() > 0.08 || dieData.body.angularVelocity.length() > 0.08)
+  )
+}
+
+function canUseTableTilt() {
+  return rollInProgress && !tiltActive && tiltUsesRemaining > 0 && getMovingRollingDice().length > 0
+}
+
+function updateTiltUI() {
+  tiltButton.disabled = !canUseTableTilt()
+}
+
+function startTableTilt() {
+  if (!canUseTableTilt()) return
+  tiltUsesRemaining -= 1
+  tiltActive = true
+  tiltElapsedSeconds = 0
+  const angle = Math.random() * Math.PI * 2
+  tiltDirection.set(Math.cos(angle), Math.sin(angle))
+  getMovingRollingDice().forEach(dieData => dieData.body.wakeUp())
+  updateTiltUI()
+}
+
+function stopTableTilt() {
+  tiltActive = false
+  tiltElapsedSeconds = 0
+  setFloorPose()
+}
+
+function updateTableTilt(delta) {
+  if (!tiltActive) {
+    updateTiltUI()
+    return
+  }
+
+  tiltElapsedSeconds += delta
+  const progress = Math.min(1, tiltElapsedSeconds / TILT_DURATION_SECONDS)
+  const pulse = Math.sin(Math.PI * progress) ** TILT_SINE_POWER
+  const tiltX = tiltDirection.x * TILT_MAX_ANGLE_RADIANS * pulse
+  const tiltZ = tiltDirection.y * TILT_MAX_ANGLE_RADIANS * pulse
+  const normal = new THREE.Vector3(-Math.sin(tiltZ), Math.cos(tiltX) * Math.cos(tiltZ), Math.sin(tiltX))
+  setFloorPose(normal, FLOOR_Y + TILT_MAX_HEIGHT_CM * pulse)
+
+  if (progress >= 1) stopTableTilt()
+  updateTiltUI()
+}
+
 const clock = {
   lastTime: performance.now(),
   getDelta() {
@@ -411,6 +526,7 @@ const HAND_BOUNDARY_RESTITUTION = 0.08
 
 let dice = []
 let rollInProgress = false
+let rollFinalizationPending = false
 let aimInProgress = false
 let aimStartWorld = null
 let aimCurrentWorld = null
@@ -420,6 +536,7 @@ let activePointerId = null
 let pendingAimTimer = null
 let pendingAimData = null
 let currentFaces = Number(diceFacesSelect.value)
+let currentRuleMode = DEFAULT_RULE_MODE
 let currentRoll = 0
 let scoreCumule = 0
 let scoreGain = 0
@@ -428,6 +545,14 @@ let roundFinalized = false
 let roundBonusApplied = false
 let pendingRoundReset = false
 let elapsedGameSeconds = 0
+let objectiveValues = []
+let objectiveMatched = false
+let tiltUsesRemaining = 0
+let tiltActive = false
+let tiltElapsedSeconds = 0
+let tiltDirection = new THREE.Vector2(1, 0)
+
+ruleModeSelect.value = currentRuleMode
 
 setDieMass(Number(massSlider.value))
 setThrowAltitudeAngle(Number(throwAngleSlider.value))
@@ -447,8 +572,71 @@ handSphere.visible = false
 scene.add(handSphere)
 
 function getKeepableDice() {
+  if (isObjectiveMode()) {
+    return new Set(dice
+      .map((dieData, index) => dieData.value != null ? index : -1)
+      .filter(index => index !== -1))
+  }
   const values = dice.map(d => d.value)
   return computeEligibleIndices(values)
+}
+
+function isObjectiveMode() {
+  return currentRuleMode === OBJECTIVE_MODE_ID
+}
+
+function getTranslatedRuleModeName(modeId) {
+  const translations = getTranslations()
+  return translations.ruleModeNames[modeId] || modeId
+}
+
+function populateRuleModeOptions() {
+  ruleModeSelect.innerHTML = ''
+  RULE_MODES.modes.forEach((mode) => {
+    const option = document.createElement('option')
+    option.value = mode.id
+    option.textContent = getTranslatedRuleModeName(mode.id)
+    ruleModeSelect.appendChild(option)
+  })
+  ruleModeSelect.value = currentRuleMode
+}
+
+function generateObjectiveValues(count, faceCount) {
+  const objectiveCount = OBJECTIVE_RULES.use_current_dice_count ? count : count
+  const objectiveFaceCount = OBJECTIVE_RULES.use_current_face_count ? faceCount : faceCount
+  return Array.from({ length: objectiveCount }, () => Math.floor(Math.random() * objectiveFaceCount) + 1)
+    .sort((a, b) => a - b)
+}
+
+function getCurrentRolledValues() {
+  const values = dice.map(dieData => dieData.value)
+  return values.every(value => value != null) ? values : null
+}
+
+function valuesMatchObjective(values) {
+  if (!values || values.length !== objectiveValues.length) return false
+  const sortedValues = OBJECTIVE_RULES.match_order === 'any'
+    ? [...values].sort((a, b) => a - b)
+    : [...values]
+  return sortedValues.every((value, index) => value === objectiveValues[index])
+}
+
+function updateObjectiveUI() {
+  const translations = getTranslations()
+  scoreDisplay.hidden = isObjectiveMode()
+  objectivePanel.hidden = !isObjectiveMode()
+  if (!isObjectiveMode()) return
+
+  objectiveTitle.textContent = translations.objectiveTitle
+  objectiveValuesDisplay.textContent = translations.objectiveValues(objectiveValues)
+  const currentValues = getCurrentRolledValues()
+  objectiveMatched = valuesMatchObjective(currentValues)
+  objectiveStatus.textContent = objectiveMatched
+    ? translations.objectiveSuccess
+    : currentRoll === 0 || !currentValues
+      ? translations.objectiveWaiting
+      : translations.objectiveProgress
+  objectivePanel.classList.toggle('complete', objectiveMatched)
 }
 
 function getDieColor(index) {
@@ -496,9 +684,13 @@ function applyLocalization() {
   languageToggle.setAttribute('title', translations.toggleLanguageLabel)
   diceCountLabel.textContent = translations.diceCountLabel
   diceFacesLabel.textContent = translations.diceFacesLabel
+  ruleModeLabel.textContent = translations.ruleModeLabel
+  populateRuleModeOptions()
   resetButton.textContent = translations.resetButton
+  tiltButton.textContent = translations.tiltButton
   updateRollUI()
   updateScoreDisplay()
+  updateObjectiveUI()
 }
 
 function toggleLanguage() {
@@ -553,14 +745,16 @@ function renderDiceButtons() {
       dieData.mesh.visible = !dieData.kept
       if (dieData.kept) {
         dieData.body.type = CANNON.Body.STATIC
-        // Animation and score
-        showScoreAnimation(`+${POINTS_PER_DIE}`, dieData)
-        scoreGain += POINTS_PER_DIE
+        if (!isObjectiveMode()) {
+          showScoreAnimation(`+${POINTS_PER_DIE}`, dieData)
+          scoreGain += POINTS_PER_DIE
+        }
       } else {
         dieData.body.type = CANNON.Body.DYNAMIC
         dieData.body.wakeUp()
-        scoreGain -= POINTS_PER_DIE
+        if (!isObjectiveMode()) scoreGain -= POINTS_PER_DIE
       }
+      updateObjectiveUI()
       renderDiceButtons()
     })
 
@@ -1130,11 +1324,16 @@ function createDice(count) {
   clearDice()
   currentRoll = 0
   rollInProgress = false
+  rollFinalizationPending = false
+  stopTableTilt()
+  tiltUsesRemaining = 0
   canFinishRound = false
   roundFinalized = false
   roundBonusApplied = false
   pendingRoundReset = false
   scoreGain = 0
+  objectiveMatched = false
+  objectiveValues = isObjectiveMode() ? generateObjectiveValues(count, currentFaces) : []
   diceButtonsContainer.innerHTML = ''
 
   const radius = Math.min(2.5, 0.9 + (count - 1) * 0.3)
@@ -1147,6 +1346,8 @@ function createDice(count) {
 
   updateRollUI()
   updateScoreDisplay()
+  updateObjectiveUI()
+  updateTiltUI()
   renderDiceButtons()
   closeMenu()
 }
@@ -1201,6 +1402,7 @@ function beginHandAim(center) {
     body.wakeUp()
   })
   syncPhysics()
+  updateObjectiveUI()
   renderDiceButtons()
 }
 
@@ -1334,7 +1536,10 @@ function updateRealtimeDieFaceValues() {
       hasChanged = true
     }
   })
-  if (hasChanged) renderDiceButtons()
+  if (hasChanged) {
+    updateObjectiveUI()
+    renderDiceButtons()
+  }
 }
 
 function areRollingDiceSleeping() {
@@ -1419,8 +1624,10 @@ function determineDieFaceValue(dieData) {
 
 function finalizeRollingDice() {
   if (!rollInProgress) return
+  if (rollFinalizationPending) return
   if (!areRollingDiceSleeping()) return
 
+  rollFinalizationPending = true
   setTimeout(() => {
     dice.forEach((dieData) => {
       if (!dieData.kept && dieData.rolling) {
@@ -1429,6 +1636,9 @@ function finalizeRollingDice() {
       }
     })
     rollInProgress = false
+    rollFinalizationPending = false
+    updateObjectiveUI()
+    updateTiltUI()
     renderDiceButtons()
   }, 500)
 }
@@ -1436,6 +1646,12 @@ function finalizeRollingDice() {
 function finalizeRound() {
   if (roundFinalized) return
   roundFinalized = true
+  if (isObjectiveMode()) {
+    scoreGain = 0
+    roundBonusApplied = true
+    updateObjectiveUI()
+    return
+  }
   const bonus = getEarlyBonus(currentRoll)
   const total = scoreGain + bonus
   if (total > 0) {
@@ -1588,7 +1804,7 @@ function rollDice(launch) {
     return
   }
 
-  if (scoreGain > 0) {
+  if (!isObjectiveMode() && scoreGain > 0) {
     scoreCumule += scoreGain
     showScoreAnimation(`+${scoreGain}`, null)
     updateScoreDisplay()
@@ -1601,6 +1817,7 @@ function rollDice(launch) {
     forceRatio: 0.55,
   }
   const throwLaunch = launch || fallbackLaunch
+  stopTableTilt()
   releaseAimedDice()
   activeDice.forEach((dieData) => {
     dieData.value = null
@@ -1611,8 +1828,11 @@ function rollDice(launch) {
 
   currentRoll += 1
   rollInProgress = true
+  rollFinalizationPending = false
+  tiltUsesRemaining = TILT_USES_PER_ROLL
   renderDiceButtons()
   updateRollUI()
+  updateTiltUI()
   if (currentRoll >= MAX_ROLLS) {
     canFinishRound = true
   }
@@ -1789,6 +2009,12 @@ diceFacesSelect.addEventListener('change', (event) => {
   closeMenu()
 })
 
+ruleModeSelect.addEventListener('change', (event) => {
+  currentRuleMode = event.target.value
+  createDice(Number(diceCountSelect.value))
+  closeMenu()
+})
+
 frictionSlider.addEventListener('input', (event) => {
   setGroundFriction(Number(event.target.value))
 })
@@ -1816,6 +2042,7 @@ canvas.addEventListener('pointercancel', cancelAim)
 menuButton.addEventListener('click', toggleMenu)
 tuningButton.addEventListener('click', toggleTuningMenu)
 languageToggle.addEventListener('click', toggleLanguage)
+tiltButton.addEventListener('click', startTableTilt)
 resetButton.addEventListener('click', () => createDice(Number(diceCountSelect.value)))
 
 function animate() {
@@ -1827,6 +2054,7 @@ function animate() {
     moveHandAim(aimCurrentWorld)
     containAimedDiceInHandSphere()
   }
+  updateTableTilt(delta)
   world.step(timeStep, delta, 3)
   containAimedDiceInHandSphere()
   updateDiceFloorContactTimes()
