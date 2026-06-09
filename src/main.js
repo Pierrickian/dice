@@ -398,16 +398,24 @@ const D6_FACE_NORMALS = [
 const CAMERA_FALLBACK_RADIUS = 1.4
 const CAMERA_MARGIN = 1.12
 const CAMERA_PAN_MAX_FACTOR = 0.75
-const D6_CLUSTER_SPACING = 1.18
-const POLY_DICE_CLUSTER_SPACING = 2.15
 const MAX_DRAG_DISTANCE = 2.8
 const AIM_SUSPEND_HEIGHT = 2.15
+const HAND_BASE_RADIUS = 1.15
+const HAND_RADIUS_PER_DIE = 0.08
+const HAND_DRAG_RADIUS_RANGE = 0.55
+const HAND_SPRING_STRENGTH = 95
+const HAND_DAMPING = 0.72
+const HAND_ANGULAR_DAMPING = 0.82
+const HAND_MAX_CONTAINMENT_DISTANCE = 0.82
+const HAND_ORIENTATION_JITTER = 0.18
 
 let dice = []
 let rollInProgress = false
 let aimInProgress = false
 let aimStartWorld = null
 let aimCurrentWorld = null
+let handSphereCenter = null
+let handSphereRadius = HAND_BASE_RADIUS
 let activePointerId = null
 let pendingAimTimer = null
 let pendingAimData = null
@@ -422,6 +430,20 @@ let pendingRoundReset = false
 
 setDieMass(Number(massSlider.value))
 setThrowAltitudeAngle(Number(throwAngleSlider.value))
+
+const handSphere = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 32, 18),
+  new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.16,
+    roughness: 0.3,
+    metalness: 0.05,
+    depthWrite: false,
+  })
+)
+handSphere.visible = false
+scene.add(handSphere)
 
 function getKeepableDice() {
   const values = dice.map(d => d.value)
@@ -1056,6 +1078,8 @@ function createDie(x, z, index) {
     rolling: false,
     kept: false,
     aimOrientationLocked: false,
+    defaultLinearDamping: body.linearDamping,
+    defaultAngularDamping: body.angularDamping,
     index,
   }
 }
@@ -1129,61 +1153,129 @@ function getRollableDice() {
   return dice.filter(dieData => !dieData.kept || currentRoll === 0)
 }
 
-function getClusterOffset(index, count) {
+function getHandRadius(forceRatio, activeCount) {
+  return HAND_BASE_RADIUS + Math.max(0, activeCount - 1) * HAND_RADIUS_PER_DIE + forceRatio * HAND_DRAG_RADIUS_RANGE
+}
+
+function getHandDiceOffset(index, count, radius) {
   if (count <= 1) return new THREE.Vector3(0, 0, 0)
   const angle = (index / count) * Math.PI * 2
-  const spacing = currentFaces === 6 ? D6_CLUSTER_SPACING : POLY_DICE_CLUSTER_SPACING
+  const ringRadius = Math.min(radius * 0.34, HAND_MAX_CONTAINMENT_DISTANCE)
   return new THREE.Vector3(
-    Math.cos(angle) * spacing,
-    0,
-    Math.sin(angle) * spacing
+    Math.cos(angle) * ringRadius,
+    (index % 2) * 0.12 - 0.06,
+    Math.sin(angle) * ringRadius
   )
 }
 
-function placeDieForAiming(dieData, center, clusterIndex, activeCount, suspended = false) {
-  const body = dieData.body
-  body.velocity.set(0, 0, 0)
-  body.angularVelocity.set(0, 0, 0)
-  const offset = getClusterOffset(clusterIndex, activeCount)
-  body.position.set(
-    center.x + offset.x,
-    FLOOR_Y + (suspended ? AIM_SUSPEND_HEIGHT : 0.82) + (suspended ? 0 : Math.random() * 0.12),
-    center.z + offset.z
-  )
-  if (!suspended || !dieData.aimOrientationLocked) {
-    body.quaternion.set(
-      Math.random(),
-      Math.random(),
-      Math.random(),
-      Math.random()
-    )
-    body.quaternion.normalize()
-    dieData.aimOrientationLocked = suspended
-  }
-  body.type = suspended ? CANNON.Body.STATIC : CANNON.Body.DYNAMIC
-  body.collisionResponse = !suspended
-  body.wakeUp()
+function getAimForceRatio() {
+  if (!aimStartWorld || !aimCurrentWorld) return 0
+  const distance = aimStartWorld.clone().sub(aimCurrentWorld).setY(0).length()
+  return Math.min(1, distance / MAX_DRAG_DISTANCE)
 }
 
-function placeRollableDice(center, suspended = false) {
+function updateHandSphere(center, forceRatio = getAimForceRatio()) {
   const activeDice = getRollableDice()
+  handSphereCenter = center.clone()
+  handSphereCenter.y = FLOOR_Y + AIM_SUSPEND_HEIGHT
+  handSphereRadius = getHandRadius(forceRatio, activeDice.length)
+  handSphere.position.copy(handSphereCenter)
+  handSphere.scale.setScalar(handSphereRadius)
+  handSphere.visible = true
+}
+
+function beginHandAim(center) {
+  const activeDice = getRollableDice()
+  updateHandSphere(center, 0)
   activeDice.forEach((dieData, index) => {
+    const body = dieData.body
+    const offset = getHandDiceOffset(index, activeDice.length, handSphereRadius)
     dieData.value = null
     dieData.rolling = false
     dieData.mesh.visible = true
-    placeDieForAiming(dieData, center, index, activeDice.length, suspended)
+    dieData.aimOrientationLocked = false
+    body.mass = getSimulatedDieMassKg()
+    body.type = CANNON.Body.DYNAMIC
+    body.collisionResponse = true
+    body.linearDamping = HAND_DAMPING
+    body.angularDamping = HAND_ANGULAR_DAMPING
+    body.position.set(
+      handSphereCenter.x + offset.x,
+      handSphereCenter.y + offset.y,
+      handSphereCenter.z + offset.z
+    )
+    body.velocity.set(0, 0, 0)
+    body.angularVelocity.set(
+      (Math.random() - 0.5) * 0.8,
+      (Math.random() - 0.5) * 0.8,
+      (Math.random() - 0.5) * 0.8
+    )
+    body.quaternion.set(Math.random(), Math.random(), Math.random(), Math.random())
+    body.quaternion.normalize()
+    body.updateMassProperties()
+    body.wakeUp()
   })
   syncPhysics()
   renderDiceButtons()
 }
 
+function moveHandAim(center) {
+  if (!handSphereCenter) {
+    updateHandSphere(center)
+    return
+  }
+  updateHandSphere(center)
+}
+
+function applyHandSphereForces() {
+  if (!aimInProgress || !handSphereCenter) return
+
+  const activeDice = getRollableDice()
+  activeDice.forEach((dieData, index) => {
+    const body = dieData.body
+    const offset = getHandDiceOffset(index, activeDice.length, handSphereRadius)
+    const target = handSphereCenter.clone().add(offset)
+    const position = new THREE.Vector3(body.position.x, body.position.y, body.position.z)
+    const toTarget = target.sub(position)
+    const velocity = new THREE.Vector3(body.velocity.x, body.velocity.y, body.velocity.z)
+    const force = toTarget.multiplyScalar(HAND_SPRING_STRENGTH * getSimulatedDieMassKg())
+      .sub(velocity.multiplyScalar(1.6 * getSimulatedDieMassKg()))
+
+    body.applyForce(new CANNON.Vec3(force.x, force.y, force.z), body.position)
+    body.angularVelocity.x += (Math.random() - 0.5) * HAND_ORIENTATION_JITTER
+    body.angularVelocity.y += (Math.random() - 0.5) * HAND_ORIENTATION_JITTER
+    body.angularVelocity.z += (Math.random() - 0.5) * HAND_ORIENTATION_JITTER
+
+    const fromCenter = position.sub(handSphereCenter)
+    const maxDistance = Math.max(0.25, handSphereRadius - DICE_TARGET_SIZE_CM * 0.5)
+    if (fromCenter.length() > maxDistance) {
+      fromCenter.setLength(maxDistance)
+      body.position.set(
+        handSphereCenter.x + fromCenter.x,
+        handSphereCenter.y + fromCenter.y,
+        handSphereCenter.z + fromCenter.z
+      )
+      body.velocity.scale(0.45, body.velocity)
+    }
+    body.wakeUp()
+  })
+}
+
+function hideHandSphere() {
+  handSphere.visible = false
+  handSphereCenter = null
+}
+
 function releaseAimedDice() {
+  hideHandSphere()
   const activeDice = getRollableDice()
   activeDice.forEach((dieData) => {
     dieData.aimOrientationLocked = false
     dieData.body.mass = getSimulatedDieMassKg()
     dieData.body.type = CANNON.Body.DYNAMIC
     dieData.body.collisionResponse = true
+    dieData.body.linearDamping = dieData.defaultLinearDamping
+    dieData.body.angularDamping = dieData.defaultAngularDamping
     dieData.body.updateMassProperties()
     dieData.body.wakeUp()
   })
@@ -1552,7 +1644,7 @@ function startAimFromPointer(pointerData) {
   aimCurrentWorld = floorPoint.clone()
   dragStartScreen.set(pointerData.clientX, pointerData.clientY)
   dragCurrentScreen.copy(dragStartScreen)
-  placeRollableDice(aimStartWorld, true)
+  beginHandAim(aimStartWorld)
   updateAimIndicator(dragStartScreen, dragCurrentScreen)
 }
 
@@ -1612,7 +1704,7 @@ function updateAim(event) {
   if (!aimInProgress || event.pointerId !== activePointerId) return
   const floorPoint = getFloorPointFromPointer(event)
   if (floorPoint) aimCurrentWorld = floorPoint.clone()
-  placeRollableDice(aimCurrentWorld, true)
+  moveHandAim(aimCurrentWorld)
   dragCurrentScreen.set(event.clientX, event.clientY)
   updateAimIndicator(dragStartScreen, dragCurrentScreen)
 }
@@ -1633,7 +1725,7 @@ function finishAim(event) {
   if (!aimInProgress || event.pointerId !== activePointerId) return
   const floorPoint = getFloorPointFromPointer(event)
   if (floorPoint) aimCurrentWorld = floorPoint.clone()
-  placeRollableDice(aimCurrentWorld, true)
+  moveHandAim(aimCurrentWorld)
   const launch = getLaunchFromDrag(aimStartWorld, aimCurrentWorld)
   aimInProgress = false
   activePointerId = null
@@ -1708,10 +1800,11 @@ function animate() {
   requestAnimationFrame(animate)
 
   const delta = clock.getDelta()
-  world.step(timeStep, delta, 3)
   if (aimInProgress && aimCurrentWorld) {
-    placeRollableDice(aimCurrentWorld, true)
+    moveHandAim(aimCurrentWorld)
+    applyHandSphereForces()
   }
+  world.step(timeStep, delta, 3)
   syncPhysics()
   finalizeRollingDice()
   updateCameraFrame(delta)
