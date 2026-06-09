@@ -47,7 +47,7 @@ body,
 }
 
 #tuning-button,
-#language-button {
+#language-toggle {
   position: absolute;
   top: 16px;
   width: 44px;
@@ -70,10 +70,6 @@ body,
   left: 70px;
 }
 
-#language-button {
-  right: 16px;
-}
-
 #menu-button span {
   display: block;
   width: 22px;
@@ -83,23 +79,12 @@ body,
 }
 
 #language-toggle {
-  position: absolute;
-  top: 16px;
-  left: 70px;
-  width: 44px;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  right: 16px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 50%;
-  background: rgba(18, 20, 34, 0.9);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
-  cursor: pointer;
   font-size: 1.45rem;
   line-height: 1;
-  pointer-events: auto;
-  z-index: 4;
 }
 
 #language-toggle:focus-visible {

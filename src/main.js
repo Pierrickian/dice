@@ -128,6 +128,7 @@ app.innerHTML = `
       <span></span>
     </button>
     <button id="tuning-button" type="button" aria-label="Réglages">⚙</button>
+    <button id="language-toggle" type="button" aria-label="Passer en anglais">🇬🇧</button>
     <div id="menu-panel" class="closed">
       <div class="control-row">
         <label id="dice-count-label" for="dice-count">Nombre de dés</label>
@@ -479,10 +480,6 @@ function closeMenu() {
 function toggleTuningMenu() {
   tuningPanel.classList.toggle('open')
   menuPanel.classList.remove('open')
-}
-
-function toggleLanguage() {
-  languageButton.textContent = languageButton.textContent === 'FR' ? 'EN' : 'FR'
 }
 
 function renderDiceButtons() {
@@ -1209,22 +1206,6 @@ function isDieSettledOnFace(dieData) {
   return false
 }
 
-function isDieSettledOnFace(dieData) {
-  const faceNormals = dieData.mesh.geometry.userData.faceNormals
-  if (!faceNormals) return true
-
-  const down = new THREE.Vector3(0, -1, 0)
-  let bestDot = -Infinity
-  for (const entry of faceNormals) {
-    const dot = entry.normal.clone().applyQuaternion(dieData.mesh.quaternion).dot(down)
-    bestDot = Math.max(bestDot, dot)
-  }
-
-  if (bestDot >= FACE_SETTLE_DOT) return true
-
-  return false
-}
-
 function determineDieFaceValue(dieData) {
   const up = new THREE.Vector3(0, 1, 0)
   if (currentFaces === 6) {
@@ -1675,7 +1656,7 @@ canvas.addEventListener('pointermove', updateAim)
 canvas.addEventListener('pointerup', finishAim)
 canvas.addEventListener('pointercancel', cancelAim)
 menuButton.addEventListener('click', toggleMenu)
-tuningButton.addEventListener('click', toggleTuning)
+tuningButton.addEventListener('click', toggleTuningMenu)
 languageToggle.addEventListener('click', toggleLanguage)
 resetButton.addEventListener('click', () => createDice(Number(diceCountSelect.value)))
 
