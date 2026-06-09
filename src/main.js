@@ -387,6 +387,14 @@ const DICE_TARGET_SIZE_CM = 1.2
 const DICE_MIN_SIZE_CM = 1
 const DICE_MAX_SIZE_CM = 1.5
 const D6_BEVEL_RATIO = 0.08
+const D6_FACE_NORMALS = [
+  { value: 1, normal: new THREE.Vector3(0, 1, 0) },
+  { value: 2, normal: new THREE.Vector3(0, 0, 1) },
+  { value: 3, normal: new THREE.Vector3(1, 0, 0) },
+  { value: 4, normal: new THREE.Vector3(-1, 0, 0) },
+  { value: 5, normal: new THREE.Vector3(0, 0, -1) },
+  { value: 6, normal: new THREE.Vector3(0, -1, 0) },
+]
 const CAMERA_FALLBACK_RADIUS = 1.4
 const CAMERA_MARGIN = 1.12
 const CAMERA_PAN_MAX_FACTOR = 0.75
@@ -586,6 +594,7 @@ function createDieGeometry(faceCount) {
       const bevel = size * D6_BEVEL_RATIO
       const geometry = new RoundedBoxGeometry(size, size, size, 4, bevel)
       geometry.userData.physicsDefinition = createBeveledBoxDefinition(size / 2, bevel)
+      geometry.userData.faceNormals = D6_FACE_NORMALS
       return geometry
     }
     default: {
@@ -1227,9 +1236,25 @@ function areRollingDiceSleeping() {
     )
 }
 
+function getDieFaceNormals(dieData) {
+  return dieData.mesh.geometry.userData.faceNormals || []
+}
+
+function wakeUpBodyTiltAngle(dieData) {
+  const body = dieData.body
+  if (body.velocity.length() >= 0.08 || body.angularVelocity.length() >= 0.08) return
+
+  body.wakeUp()
+  body.angularVelocity.set(
+    body.angularVelocity.x + (Math.random() - 0.5) * 1.2,
+    body.angularVelocity.y,
+    body.angularVelocity.z + (Math.random() - 0.5) * 1.2
+  )
+}
+
 function isDieSettledOnFace(dieData) {
-  const faceNormals = dieData.mesh.geometry.userData.faceNormals
-  if (!faceNormals) return true
+  const faceNormals = getDieFaceNormals(dieData)
+  if (faceNormals.length === 0) return true
 
   const down = new THREE.Vector3(0, -1, 0)
   let bestDot = -Infinity
@@ -1240,45 +1265,17 @@ function isDieSettledOnFace(dieData) {
 
   if (bestDot >= FACE_SETTLE_DOT) return true
 
-  const body = dieData.body
-  if (body.velocity.length() < 0.08 && body.angularVelocity.length() < 0.08) {
-    body.wakeUp()
-    body.angularVelocity.set(
-      body.angularVelocity.x + (Math.random() - 0.5) * 1.2,
-      body.angularVelocity.y,
-      body.angularVelocity.z + (Math.random() - 0.5) * 1.2
-    )
-  }
+  wakeUpBodyTiltAngle(dieData)
   return false
 }
 
 function determineDieFaceValue(dieData) {
   const up = new THREE.Vector3(0, 1, 0)
-  if (currentFaces === 6) {
-    const axes = [
-      { value: 1, normal: new THREE.Vector3(0, 1, 0) },
-      { value: 2, normal: new THREE.Vector3(0, 0, 1) },
-      { value: 3, normal: new THREE.Vector3(1, 0, 0) },
-      { value: 4, normal: new THREE.Vector3(-1, 0, 0) },
-      { value: 5, normal: new THREE.Vector3(0, 0, -1) },
-      { value: 6, normal: new THREE.Vector3(0, -1, 0) },
-    ]
-    let bestValue = 1
-    let bestScore = -Infinity
-    for (const entry of axes) {
-      const score = entry.normal.clone().applyQuaternion(dieData.mesh.quaternion).dot(up)
-      if (score > bestScore) {
-        bestScore = score
-        bestValue = entry.value
-      }
-    }
-    return bestValue
-  }
-  const geometry = dieData.mesh.geometry
-  if (geometry.userData.faceNormals) {
+  const faceNormals = getDieFaceNormals(dieData)
+  if (faceNormals.length > 0) {
     let bestValue = 1
     let bestDot = -Infinity
-    for (const entry of geometry.userData.faceNormals) {
+    for (const entry of faceNormals) {
       const dot = entry.normal.clone().applyQuaternion(dieData.mesh.quaternion).dot(up)
       if (dot > bestDot) {
         bestDot = dot
@@ -1287,6 +1284,7 @@ function determineDieFaceValue(dieData) {
     }
     return bestValue
   }
+  const geometry = dieData.mesh.geometry
   const position = geometry.attributes.position
   const normals = []
   const normal = new THREE.Vector3()
