@@ -17,6 +17,7 @@ body,
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
 }
 
 #ui {
@@ -45,6 +46,30 @@ body,
   z-index: 4;
 }
 
+#tuning-button,
+#language-toggle {
+  position: absolute;
+  top: 16px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: rgba(18, 20, 34, 0.9);
+  border-radius: 14px;
+  color: white;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 4;
+}
+
+#tuning-button {
+  left: 70px;
+}
+
 #menu-button span {
   display: block;
   width: 22px;
@@ -54,23 +79,12 @@ body,
 }
 
 #language-toggle {
-  position: absolute;
-  top: 16px;
-  left: 70px;
-  width: 44px;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  right: 16px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 50%;
-  background: rgba(18, 20, 34, 0.9);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
-  cursor: pointer;
   font-size: 1.45rem;
   line-height: 1;
-  pointer-events: auto;
-  z-index: 4;
 }
 
 #language-toggle:focus-visible {
@@ -98,6 +112,27 @@ body,
   display: flex;
 }
 
+#tuning-panel {
+  position: absolute;
+  top: 70px;
+  left: 70px;
+  width: 240px;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(18, 20, 34, 0.99);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+  z-index: 3;
+}
+
+#tuning-panel.open {
+  display: flex;
+}
+
 .control-row {
   display: flex;
   flex-direction: column;
@@ -122,7 +157,7 @@ body,
 
 #roll-panel {
   position: absolute;
-  top: 16px;
+  top: 70px;
   right: 16px;
   width: min(260px, calc(100vw - 32px));
   display: flex;
@@ -209,6 +244,69 @@ body,
   color: #ffd700;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   font-weight: bold;
+}
+
+#friction-control,
+#dice-friction-control,
+#mass-control,
+#throw-force-control,
+#throw-angle-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(18, 20, 34, 0.72);
+  color: #e8e8f0;
+}
+
+#friction-control label,
+#dice-friction-control label,
+#mass-control label,
+#throw-force-control label,
+#throw-angle-control label {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+#friction-control output,
+#dice-friction-control output,
+#mass-control output,
+#throw-force-control output,
+#throw-angle-control output {
+  min-width: 3.6ch;
+  color: #ffd700;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+#friction-slider,
+#dice-friction-slider,
+#mass-slider,
+#throw-force-slider,
+#throw-angle-slider {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: #ffd700;
+  cursor: pointer;
+}
+
+#aim-indicator {
+  position: absolute;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 215, 0, 0.95), rgba(255, 255, 255, 0));
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 0 50%;
+  transition: opacity 0.08s ease;
+}
+
+#aim-indicator.visible {
+  opacity: 1;
 }
 
 #score-animations {

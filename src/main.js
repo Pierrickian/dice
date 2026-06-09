@@ -1,6 +1,7 @@
 import './style.css'
 import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import RULES from './rules.json'
 
 // ─── Rules interpreter ────────────────────────────────────────────────────────
@@ -126,6 +127,7 @@ app.innerHTML = `
       <span></span>
       <span></span>
     </button>
+    <button id="tuning-button" type="button" aria-label="Réglages">⚙</button>
     <button id="language-toggle" type="button" aria-label="Passer en anglais">🇬🇧</button>
     <div id="menu-panel" class="closed">
       <div class="control-row">
@@ -151,6 +153,33 @@ app.innerHTML = `
         </select>
       </div>
     </div>
+    <div id="tuning-panel">
+      <div id="friction-control">
+        <label for="friction-slider">Sol</label>
+        <input id="friction-slider" type="range" min="0.002" max="0.08" step="0.002" value="0.018">
+        <output id="friction-value" for="friction-slider">0.018</output>
+      </div>
+      <div id="dice-friction-control">
+        <label for="dice-friction-slider">Dés</label>
+        <input id="dice-friction-slider" type="range" min="0.001" max="0.07" step="0.001" value="0.012">
+        <output id="dice-friction-value" for="dice-friction-slider">0.012</output>
+      </div>
+      <div id="mass-control">
+        <label for="mass-slider">Masse</label>
+        <input id="mass-slider" type="range" min="0" max="10" step="0.5" value="6">
+        <output id="mass-value" for="mass-slider">6.0 g</output>
+      </div>
+      <div id="throw-force-control">
+        <label for="throw-force-slider">Force</label>
+        <input id="throw-force-slider" type="range" min="0.02" max="0.45" step="0.01" value="0.20">
+        <output id="throw-force-value" for="throw-force-slider">0.20</output>
+      </div>
+      <div id="throw-angle-control">
+        <label for="throw-angle-slider">Altitude</label>
+        <input id="throw-angle-slider" type="range" min="-10" max="10" step="1" value="0">
+        <output id="throw-angle-value" for="throw-angle-slider">0°</output>
+      </div>
+    </div>
     <div id="roll-panel">
       <div id="roll-header">Lancer 1 / 3</div>
       <div id="score-display">Score : 0</div>
@@ -159,6 +188,7 @@ app.innerHTML = `
         <button id="reset-button" type="button" class="secondary">Réinitialiser</button>
       </div>
     </div>
+    <div id="aim-indicator"></div>
     <div id="score-animations"></div>
   </div>
   <canvas id="bg"></canvas>
@@ -169,6 +199,8 @@ const diceCountSelect = document.querySelector('#dice-count')
 const diceFacesSelect = document.querySelector('#dice-faces')
 const menuButton = document.querySelector('#menu-button')
 const menuPanel = document.querySelector('#menu-panel')
+const tuningButton = document.querySelector('#tuning-button')
+const tuningPanel = document.querySelector('#tuning-panel')
 const languageToggle = document.querySelector('#language-toggle')
 const diceCountLabel = document.querySelector('#dice-count-label')
 const diceFacesLabel = document.querySelector('#dice-faces-label')
@@ -177,6 +209,17 @@ const diceButtonsContainer = document.querySelector('#dice-buttons')
 const resetButton = document.querySelector('#reset-button')
 const scoreDisplay = document.querySelector('#score-display')
 const scoreAnimations = document.querySelector('#score-animations')
+const frictionSlider = document.querySelector('#friction-slider')
+const frictionValue = document.querySelector('#friction-value')
+const diceFrictionSlider = document.querySelector('#dice-friction-slider')
+const diceFrictionValue = document.querySelector('#dice-friction-value')
+const massSlider = document.querySelector('#mass-slider')
+const massValue = document.querySelector('#mass-value')
+const throwForceSlider = document.querySelector('#throw-force-slider')
+const throwForceValue = document.querySelector('#throw-force-value')
+const throwAngleSlider = document.querySelector('#throw-angle-slider')
+const throwAngleValue = document.querySelector('#throw-angle-value')
+const aimIndicator = document.querySelector('#aim-indicator')
 resetButton.style.display = 'none'
 
 const scene = new THREE.Scene()
@@ -187,8 +230,23 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   1000
 )
-camera.position.set(0, 4, 8)
-camera.lookAt(0, 0, 0)
+const CAMERA_DEFAULT_POSITION = new THREE.Vector3(0, 5.4, 7.3)
+const CAMERA_DEFAULT_TARGET = new THREE.Vector3(0, 0, 0)
+camera.position.copy(CAMERA_DEFAULT_POSITION)
+camera.lookAt(CAMERA_DEFAULT_TARGET)
+const cameraTarget = CAMERA_DEFAULT_TARGET.clone()
+const cameraOffset = CAMERA_DEFAULT_POSITION.clone().sub(CAMERA_DEFAULT_TARGET)
+const CAMERA_SCREEN_LOWER_TARGET_OFFSET = 3.4
+const raycaster = new THREE.Raycaster()
+const pointerNdc = new THREE.Vector2()
+const dragStartScreen = new THREE.Vector2()
+const dragCurrentScreen = new THREE.Vector2()
+const activePointers = new Map()
+const cameraPanOffset = new THREE.Vector3()
+let cameraZoomScale = 1
+let pinchInProgress = false
+let pinchStartDistance = 0
+let pinchStartZoomScale = 1
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -206,29 +264,101 @@ const directionalLight = new THREE.DirectionalLight(0xffffff, 1.8)
 directionalLight.position.set(5, 10, 7)
 scene.add(directionalLight)
 
-const floorGeometry = new THREE.PlaneGeometry(20, 20)
+const floorGeometry = new THREE.PlaneGeometry(60, 60)
 const floorMaterial = new THREE.MeshStandardMaterial({
   color: 0x2c2c3e,
   roughness: 0.9,
   metalness: 0.1,
 })
 const FLOOR_Y = -1.5
+const floorPickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -FLOOR_Y)
 const floor = new THREE.Mesh(floorGeometry, floorMaterial)
 floor.rotation.x = -Math.PI / 2
 floor.position.y = FLOOR_Y
 scene.add(floor)
 
 const world = new CANNON.World()
-world.gravity.set(0, -15, 0)
+world.gravity.set(0, -9.81, 0)
 world.allowSleep = true
+world.solver.iterations = 14
+world.solver.tolerance = 0.001
 
 const diceMaterial = new CANNON.Material('dice')
 const floorMaterialBody = new CANNON.Material('floor')
 const contactMaterial = new CANNON.ContactMaterial(diceMaterial, floorMaterialBody, {
-  friction: 1.1,
-  restitution: 0.18,
+  friction: 0.018,
+  restitution: 0.02,
+  contactEquationStiffness: 1e7,
+  contactEquationRelaxation: 4,
+  frictionEquationStiffness: 1e7,
+  frictionEquationRelaxation: 4,
 })
-world.defaultContactMaterial = contactMaterial
+const diceContactMaterial = new CANNON.ContactMaterial(diceMaterial, diceMaterial, {
+  friction: 0.012,
+  restitution: 0.02,
+  contactEquationStiffness: 1e7,
+  contactEquationRelaxation: 4,
+  frictionEquationStiffness: 1e7,
+  frictionEquationRelaxation: 4,
+})
+world.addContactMaterial(contactMaterial)
+world.addContactMaterial(diceContactMaterial)
+world.defaultContactMaterial.friction = 0.014
+world.defaultContactMaterial.restitution = 0.02
+const MIN_SIMULATED_DIE_MASS_KG = 0.0005
+let dieMassKg = Number(massSlider.value) / 1000
+const DEFAULT_FORCE_PER_KG = 0.2 / 0.006
+let throwForceImpulse = Number(throwForceSlider.value)
+let forceFollowsMass = true
+let throwAltitudeAngleDeg = Number(throwAngleSlider.value)
+
+function setGroundFriction(value) {
+  contactMaterial.friction = value
+  world.defaultContactMaterial.friction = Math.max(0.001, value * 0.75)
+  frictionValue.textContent = value.toFixed(3)
+}
+
+setGroundFriction(Number(frictionSlider.value))
+
+function setDiceFriction(value) {
+  diceContactMaterial.friction = value
+  diceFrictionValue.textContent = value.toFixed(3)
+}
+
+setDiceFriction(Number(diceFrictionSlider.value))
+
+function getSimulatedDieMassKg() {
+  return Math.max(MIN_SIMULATED_DIE_MASS_KG, dieMassKg)
+}
+
+function setDieMass(grams) {
+  dieMassKg = grams / 1000
+  massValue.textContent = `${grams.toFixed(1)} g`
+  if (forceFollowsMass) {
+    setThrowForce(getDefaultThrowForceForMass(), false)
+  }
+  dice.forEach((dieData) => {
+    dieData.body.mass = getSimulatedDieMassKg()
+    dieData.body.updateMassProperties()
+    dieData.body.wakeUp()
+  })
+}
+
+function getDefaultThrowForceForMass() {
+  return THREE.MathUtils.clamp(getSimulatedDieMassKg() * DEFAULT_FORCE_PER_KG, 0.02, 0.45)
+}
+
+function setThrowForce(value, manual = true) {
+  throwForceImpulse = value
+  throwForceSlider.value = value.toFixed(2)
+  throwForceValue.textContent = value.toFixed(2)
+  if (manual) forceFollowsMass = false
+}
+
+function setThrowAltitudeAngle(degrees) {
+  throwAltitudeAngleDeg = degrees
+  throwAngleValue.textContent = `${degrees}°`
+}
 
 const floorBody = new CANNON.Body({
   mass: 0,
@@ -249,12 +379,23 @@ const clock = {
   },
 }
 const timeStep = 1 / 60
-const boundaryRadius = 4.5
-const FACE_SETTLE_DOT = 0.86
-let cameraZoomTimer = 0
+const FACE_SETTLE_DOT = 0.82
+const CAMERA_FALLBACK_RADIUS = 1.4
+const CAMERA_MARGIN = 1.12
+const CAMERA_PAN_MAX_FACTOR = 0.75
+const D6_CLUSTER_SPACING = 1.18
+const POLY_DICE_CLUSTER_SPACING = 2.15
+const MAX_DRAG_DISTANCE = 2.8
+const AIM_SUSPEND_HEIGHT = 2.15
 
 let dice = []
 let rollInProgress = false
+let aimInProgress = false
+let aimStartWorld = null
+let aimCurrentWorld = null
+let activePointerId = null
+let pendingAimTimer = null
+let pendingAimData = null
 let currentFaces = Number(diceFacesSelect.value)
 let currentRoll = 0
 let scoreCumule = 0
@@ -263,6 +404,9 @@ let canFinishRound = false
 let roundFinalized = false
 let roundBonusApplied = false
 let pendingRoundReset = false
+
+setDieMass(Number(massSlider.value))
+setThrowAltitudeAngle(Number(throwAngleSlider.value))
 
 function getKeepableDice() {
   const values = dice.map(d => d.value)
@@ -326,9 +470,15 @@ function toggleLanguage() {
 
 function toggleMenu() {
   menuPanel.classList.toggle('open')
+  tuningPanel.classList.remove('open')
 }
 
 function closeMenu() {
+  menuPanel.classList.remove('open')
+}
+
+function toggleTuningMenu() {
+  tuningPanel.classList.toggle('open')
   menuPanel.classList.remove('open')
 }
 
@@ -421,23 +571,27 @@ function createPolyDieDefinition(faceCount) {
 
 function createDieGeometry(faceCount) {
   const definition = getPolyDieDefinition(faceCount)
-  if (definition) return createPolyDieGeometry(definition)
+  if (definition) return createPolyDieGeometry(definition, faceCount)
 
   switch (faceCount) {
-    case 6:
-      return new THREE.BoxGeometry(1, 1, 1)
+    case 6: {
+      const geometry = new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
+      geometry.userData.physicsDefinition = createBeveledBoxDefinition(0.5, 0.08)
+      return geometry
+    }
     default:
-      return new THREE.BoxGeometry(1, 1, 1)
+      return new RoundedBoxGeometry(1, 1, 1, 4, 0.08)
   }
 }
 
-function createPolyDieGeometry(definition) {
+function createPolyDieGeometry(definition, faceCount) {
+  const physicsDefinition = createBeveledPolyDieDefinition(definition, faceCount)
   const vertices = []
-  for (const face of definition.faces) {
+  for (const face of physicsDefinition.faces) {
     for (let i = 1; i < face.length - 1; i += 1) {
-      vertices.push(...definition.vertices[face[0]])
-      vertices.push(...definition.vertices[face[i]])
-      vertices.push(...definition.vertices[face[i + 1]])
+      vertices.push(...physicsDefinition.vertices[face[0]])
+      vertices.push(...physicsDefinition.vertices[face[i]])
+      vertices.push(...physicsDefinition.vertices[face[i + 1]])
     }
   }
 
@@ -445,11 +599,161 @@ function createPolyDieGeometry(definition) {
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
   geometry.computeVertexNormals()
   geometry.userData.polyDefinition = definition
+  geometry.userData.physicsDefinition = physicsDefinition
   geometry.userData.faceNormals = definition.faceNormals.map((normal, index) => ({
     value: index + 1,
     normal,
   }))
   return geometry
+}
+
+function getPolyBevelFactor(faceCount) {
+  switch (faceCount) {
+    case 4:
+      return 0.1
+    case 8:
+      return 0.03
+    case 10:
+      return 0.022
+    case 12:
+      return 0.016
+    case 20:
+      return 0.01
+    default:
+      return 0.012
+  }
+}
+
+function createBeveledPolyDieDefinition(definition, faceCount) {
+  const bevel = getPolyBevelFactor(faceCount)
+  const vertices = []
+  const faces = []
+  const faceVertexIndex = new Map()
+  const originalVertexFaces = new Map()
+  const edgeRecords = new Map()
+
+  definition.faces.forEach((face, faceIndex) => {
+    const faceCenter = face.reduce((sum, vertexIndex) => {
+      const vertex = new THREE.Vector3(...definition.vertices[vertexIndex])
+      return sum.add(vertex)
+    }, new THREE.Vector3()).multiplyScalar(1 / face.length)
+
+    const insetFace = face.map((vertexIndex) => {
+      const vertex = new THREE.Vector3(...definition.vertices[vertexIndex])
+      vertex.lerp(faceCenter, bevel)
+      const newIndex = vertices.length
+      vertices.push([vertex.x, vertex.y, vertex.z])
+      faceVertexIndex.set(`${faceIndex}:${vertexIndex}`, newIndex)
+
+      if (!originalVertexFaces.has(vertexIndex)) originalVertexFaces.set(vertexIndex, [])
+      originalVertexFaces.get(vertexIndex).push(faceIndex)
+      return newIndex
+    })
+    faces.push(insetFace)
+
+    for (let i = 0; i < face.length; i += 1) {
+      const a = face[i]
+      const b = face[(i + 1) % face.length]
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`
+      if (!edgeRecords.has(key)) edgeRecords.set(key, [])
+      edgeRecords.get(key).push({ faceIndex, a, b })
+    }
+  })
+
+  edgeRecords.forEach((records) => {
+    if (records.length !== 2) return
+    const [first, second] = records
+    faces.push([
+      faceVertexIndex.get(`${first.faceIndex}:${first.a}`),
+      faceVertexIndex.get(`${first.faceIndex}:${first.b}`),
+      faceVertexIndex.get(`${second.faceIndex}:${first.b}`),
+      faceVertexIndex.get(`${second.faceIndex}:${first.a}`),
+    ])
+  })
+
+  originalVertexFaces.forEach((faceIndices, vertexIndex) => {
+    if (faceIndices.length < 3) return
+    const axis = new THREE.Vector3(...definition.vertices[vertexIndex]).normalize()
+    const reference = new THREE.Vector3(...vertices[faceVertexIndex.get(`${faceIndices[0]}:${vertexIndex}`)])
+      .projectOnPlane(axis)
+      .normalize()
+    const tangent = new THREE.Vector3().crossVectors(axis, reference).normalize()
+    const cornerFace = faceIndices
+      .map(faceIndex => faceVertexIndex.get(`${faceIndex}:${vertexIndex}`))
+      .sort((a, b) => {
+        const pa = new THREE.Vector3(...vertices[a]).projectOnPlane(axis).normalize()
+        const pb = new THREE.Vector3(...vertices[b]).projectOnPlane(axis).normalize()
+        return Math.atan2(pa.dot(tangent), pa.dot(reference)) -
+          Math.atan2(pb.dot(tangent), pb.dot(reference))
+      })
+    faces.push(cornerFace)
+  })
+
+  return {
+    vertices,
+    faces: orientFacesOutward(vertices, faces),
+    faceNormals: definition.faceNormals,
+    faceDistances: definition.faceDistances,
+  }
+}
+
+function createBeveledBoxDefinition(halfSize, bevelRadius) {
+  const inset = halfSize - bevelRadius
+  const vertices = []
+  const vertexMap = new Map()
+  const faces = []
+
+  function addVertex(x, y, z) {
+    const key = `${x}:${y}:${z}`
+    if (!vertexMap.has(key)) {
+      vertexMap.set(key, vertices.length)
+      vertices.push([x, y, z])
+    }
+    return vertexMap.get(key)
+  }
+
+  function addFace(points) {
+    faces.push(points.map(([x, y, z]) => addVertex(x, y, z)))
+  }
+
+  const h = halfSize
+  const s = inset
+  const signs = [-1, 1]
+
+  addFace([[h, -s, -s], [h, s, -s], [h, s, s], [h, -s, s]])
+  addFace([[-h, -s, s], [-h, s, s], [-h, s, -s], [-h, -s, -s]])
+  addFace([[-s, h, -s], [-s, h, s], [s, h, s], [s, h, -s]])
+  addFace([[-s, -h, s], [-s, -h, -s], [s, -h, -s], [s, -h, s]])
+  addFace([[-s, -s, h], [s, -s, h], [s, s, h], [-s, s, h]])
+  addFace([[-s, s, -h], [s, s, -h], [s, -s, -h], [-s, -s, -h]])
+
+  for (const y of signs) {
+    for (const z of signs) {
+      addFace([[-s, y * h, z * s], [s, y * h, z * s], [s, y * s, z * h], [-s, y * s, z * h]])
+    }
+  }
+  for (const x of signs) {
+    for (const z of signs) {
+      addFace([[x * h, -s, z * s], [x * h, s, z * s], [x * s, s, z * h], [x * s, -s, z * h]])
+    }
+  }
+  for (const x of signs) {
+    for (const y of signs) {
+      addFace([[x * h, y * s, -s], [x * h, y * s, s], [x * s, y * h, s], [x * s, y * h, -s]])
+    }
+  }
+  for (const x of signs) {
+    for (const y of signs) {
+      for (const z of signs) {
+        addFace([[x * h, y * s, z * s], [x * s, y * h, z * s], [x * s, y * s, z * h]])
+      }
+    }
+  }
+
+  return {
+    vertices,
+    faces: orientFacesOutward(vertices, faces),
+  }
 }
 
 function buildPolyDieDefinition(vertices, faces) {
@@ -676,17 +980,17 @@ function createDie(x, z, index) {
 
   const shape = createPhysicsShape(geometry, currentFaces)
   const body = new CANNON.Body({
-    mass: 3,
+    mass: getSimulatedDieMassKg(),
     shape,
     position: new CANNON.Vec3(startPosition.x, startPosition.y, startPosition.z),
-    linearDamping: definition ? 0.32 : 0.45,
-    angularDamping: definition ? 0.22 : 0.55,
+    linearDamping: 0.5,
+    angularDamping: 0.62,
     material: diceMaterial,
   })
   body.quaternion.set(startQuaternion.x, startQuaternion.y, startQuaternion.z, startQuaternion.w)
-  body.allowSleep = !definition
-  body.sleepSpeedLimit = definition ? 0.035 : 0.15
-  body.sleepTimeLimit = definition ? 0.9 : 0.25
+  body.allowSleep = true
+  body.sleepSpeedLimit = 0.22
+  body.sleepTimeLimit = 0.22
   world.addBody(body)
 
   return {
@@ -696,6 +1000,7 @@ function createDie(x, z, index) {
     value: null,
     rolling: false,
     kept: false,
+    aimOrientationLocked: false,
     index,
   }
 }
@@ -716,7 +1021,7 @@ function clearDice() {
 }
 
 function createPhysicsShape(geometry, faceCount) {
-  const definition = geometry.userData.polyDefinition
+  const definition = geometry.userData.physicsDefinition || geometry.userData.polyDefinition
   if (definition) {
     return new CANNON.ConvexPolyhedron({
       vertices: definition.vertices.map(([x, y, z]) => new CANNON.Vec3(x, y, z)),
@@ -765,32 +1070,92 @@ function createDice(count) {
   closeMenu()
 }
 
-function resetDiePhysics(dieData) {
+function getRollableDice() {
+  return dice.filter(dieData => !dieData.kept || currentRoll === 0)
+}
+
+function getClusterOffset(index, count) {
+  if (count <= 1) return new THREE.Vector3(0, 0, 0)
+  const angle = (index / count) * Math.PI * 2
+  const spacing = currentFaces === 6 ? D6_CLUSTER_SPACING : POLY_DICE_CLUSTER_SPACING
+  return new THREE.Vector3(
+    Math.cos(angle) * spacing,
+    0,
+    Math.sin(angle) * spacing
+  )
+}
+
+function placeDieForAiming(dieData, center, clusterIndex, activeCount, suspended = false) {
   const body = dieData.body
   body.velocity.set(0, 0, 0)
   body.angularVelocity.set(0, 0, 0)
+  const offset = getClusterOffset(clusterIndex, activeCount)
   body.position.set(
-    dieData.mesh.position.x,
-    2.2 + Math.random() * 0.8,
-    dieData.mesh.position.z
+    center.x + offset.x,
+    FLOOR_Y + (suspended ? AIM_SUSPEND_HEIGHT : 0.82) + (suspended ? 0 : Math.random() * 0.12),
+    center.z + offset.z
   )
-  body.quaternion.set(
-    Math.random(),
-    Math.random(),
-    Math.random(),
-    Math.random()
-  )
-  body.quaternion.normalize()
+  if (!suspended || !dieData.aimOrientationLocked) {
+    body.quaternion.set(
+      Math.random(),
+      Math.random(),
+      Math.random(),
+      Math.random()
+    )
+    body.quaternion.normalize()
+    dieData.aimOrientationLocked = suspended
+  }
+  body.type = suspended ? CANNON.Body.STATIC : CANNON.Body.DYNAMIC
+  body.collisionResponse = !suspended
   body.wakeUp()
 }
 
-function applyDieImpulse(body) {
-  const impulse = new CANNON.Vec3((Math.random() - 0.5) * 4, 12 + Math.random() * 4, (Math.random() - 0.5) * 4)
-  body.applyImpulse(impulse, new CANNON.Vec3(0, 0, 0))
+function placeRollableDice(center, suspended = false) {
+  const activeDice = getRollableDice()
+  activeDice.forEach((dieData, index) => {
+    dieData.value = null
+    dieData.rolling = false
+    dieData.mesh.visible = true
+    placeDieForAiming(dieData, center, index, activeDice.length, suspended)
+  })
+  syncPhysics()
+  renderDiceButtons()
+}
+
+function releaseAimedDice() {
+  const activeDice = getRollableDice()
+  activeDice.forEach((dieData) => {
+    dieData.aimOrientationLocked = false
+    dieData.body.mass = getSimulatedDieMassKg()
+    dieData.body.type = CANNON.Body.DYNAMIC
+    dieData.body.collisionResponse = true
+    dieData.body.updateMassProperties()
+    dieData.body.wakeUp()
+  })
+}
+
+function applyDieImpulse(dieData, launchVector, forceRatio) {
+  const body = dieData.body
+  const centeredIndex = dieData.index - (dice.length - 1) / 2
+  const sideScatter = -centeredIndex * 0.0015 + (Math.random() - 0.5) * 0.006
+  const altitudeRadians = THREE.MathUtils.degToRad(throwAltitudeAngleDeg)
+  const horizontalForce = throwForceImpulse * Math.cos(altitudeRadians) * forceRatio
+  const verticalForce = throwForceImpulse * Math.sin(altitudeRadians) * forceRatio
+  const impulse = new CANNON.Vec3(
+    launchVector.x * horizontalForce,
+    verticalForce,
+    launchVector.z * horizontalForce + sideScatter
+  )
+  const offCenter = new CANNON.Vec3(
+    (Math.random() - 0.5) * 0.45,
+    (Math.random() - 0.5) * 0.18,
+    (Math.random() - 0.5) * 0.45
+  )
+  body.applyImpulse(impulse, offCenter)
   body.angularVelocity.set(
-    (Math.random() - 0.5) * 14,
-    (Math.random() - 0.5) * 14,
-    (Math.random() - 0.5) * 14
+    launchVector.z * 3.8 + (Math.random() - 0.5) * 1.8,
+    (Math.random() - 0.5) * 3.2,
+    -launchVector.x * 3.8 + (Math.random() - 0.5) * 1.8
   )
 }
 
@@ -929,20 +1294,124 @@ function finalizeRound() {
   roundBonusApplied = true
 }
 
-function clampDieBounds(dieData) {
-  const x = dieData.body.position.x
-  const z = dieData.body.position.z
-  const distance = Math.sqrt(x * x + z * z)
-  if (distance > boundaryRadius) {
-    const factor = boundaryRadius / distance
-    dieData.body.position.x *= factor
-    dieData.body.position.z *= factor
-    dieData.body.velocity.x *= 0.5
-    dieData.body.velocity.z *= 0.5
+function getFloorPointFromPointer(event) {
+  const rect = canvas.getBoundingClientRect()
+  return getFloorPointFromScreen(event.clientX, event.clientY, rect)
+}
+
+function getFloorPointFromScreen(clientX, clientY, rect = canvas.getBoundingClientRect()) {
+  pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1
+  pointerNdc.y = -(((clientY - rect.top) / rect.height) * 2 - 1)
+  raycaster.setFromCamera(pointerNdc, camera)
+  const point = new THREE.Vector3()
+  return raycaster.ray.intersectPlane(floorPickPlane, point) ? point : null
+}
+
+function getPinchPointers() {
+  return [...activePointers.values()].slice(0, 2)
+}
+
+function getPinchMidpoint() {
+  const [a, b] = getPinchPointers()
+  if (!a || !b) return null
+  return {
+    x: (a.clientX + b.clientX) * 0.5,
+    y: (a.clientY + b.clientY) * 0.5,
   }
 }
 
-function rollDice() {
+function getPinchDistance() {
+  const [a, b] = getPinchPointers()
+  if (!a || !b) return 0
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+}
+
+function getCameraFrame() {
+  const bounds = getVisibleDiceBounds()
+  const maxPanOffset = Math.max(0.5, bounds.radius * CAMERA_PAN_MAX_FACTOR)
+  const horizontalPanLength = Math.hypot(cameraPanOffset.x, cameraPanOffset.z)
+  if (horizontalPanLength > maxPanOffset) {
+    const factor = maxPanOffset / horizontalPanLength
+    cameraPanOffset.x *= factor
+    cameraPanOffset.z *= factor
+  }
+  const target = bounds.center.clone().add(cameraPanOffset)
+  target.y += CAMERA_SCREEN_LOWER_TARGET_OFFSET
+  const distance = Math.max(
+    cameraOffset.length(),
+    getCameraDistanceForRadius(bounds.radius)
+  ) * cameraZoomScale
+  const position = target.clone().add(
+    cameraOffset.clone().normalize().multiplyScalar(distance)
+  )
+  return { target, position }
+}
+
+function applyCameraFrame(delta, snap = false) {
+  if (!snap && (aimInProgress || pendingAimData)) return
+  if (!snap && !pinchInProgress) {
+    cameraPanOffset.lerp(new THREE.Vector3(0, 0, 0), 1 - Math.exp(-delta * 0.9))
+  }
+  const frame = getCameraFrame()
+  const smoothing = snap ? 1 : 1 - Math.exp(-delta * 5.5)
+  cameraTarget.lerp(frame.target, smoothing)
+  camera.position.lerp(frame.position, smoothing)
+  camera.lookAt(cameraTarget)
+}
+
+function beginPinchZoom() {
+  if (aimInProgress) {
+    aimInProgress = false
+    activePointerId = null
+    hideAimIndicator()
+    releaseAimedDice()
+  }
+  pinchInProgress = true
+  pinchStartDistance = getPinchDistance()
+  pinchStartZoomScale = cameraZoomScale
+}
+
+function updatePinchZoom() {
+  if (!pinchInProgress || activePointers.size < 2 || pinchStartDistance <= 0) return
+  const midpoint = getPinchMidpoint()
+  if (!midpoint) return
+
+  const before = getFloorPointFromScreen(midpoint.x, midpoint.y)
+  const nextDistance = getPinchDistance()
+  cameraZoomScale = THREE.MathUtils.clamp(
+    pinchStartZoomScale * (pinchStartDistance / Math.max(1, nextDistance)),
+    0.25,
+    5.0
+  )
+  applyCameraFrame(0, true)
+
+  const after = getFloorPointFromScreen(midpoint.x, midpoint.y)
+  if (before && after) {
+    cameraPanOffset.add(before.sub(after))
+    applyCameraFrame(0, true)
+  }
+}
+
+function endPinchZoom() {
+  if (activePointers.size < 2) {
+    pinchInProgress = false
+    pinchStartDistance = 0
+  }
+}
+
+function getLaunchFromDrag(start, end) {
+  const dragPointToOrigin = start.clone().sub(end)
+  dragPointToOrigin.y = 0
+  const distance = dragPointToOrigin.length()
+  if (distance < 0.12) return null
+  const forceRatio = Math.min(1, distance / MAX_DRAG_DISTANCE)
+  return {
+    direction: dragPointToOrigin.normalize(),
+    forceRatio,
+  }
+}
+
+function rollDice(launch) {
   if (pendingRoundReset) {
     pendingRoundReset = false
     createDice(Number(diceCountSelect.value))
@@ -969,23 +1438,186 @@ function rollDice() {
     scoreGain = 0
   }
 
-  for (const dieData of dice) {
-    if (!dieData.kept || currentRoll === 0) {
-      dieData.value = null
-      dieData.rolling = true
-      resetDiePhysics(dieData)
-      applyDieImpulse(dieData.body)
-    }
+  const activeDice = getRollableDice()
+  const fallbackLaunch = {
+    direction: new THREE.Vector3(1, 0, 0),
+    forceRatio: 0.55,
   }
+  const throwLaunch = launch || fallbackLaunch
+  releaseAimedDice()
+  activeDice.forEach((dieData) => {
+    dieData.value = null
+    dieData.rolling = true
+    applyDieImpulse(dieData, throwLaunch.direction, throwLaunch.forceRatio)
+  })
 
   currentRoll += 1
   rollInProgress = true
-  cameraZoomTimer = 0
   renderDiceButtons()
   updateRollUI()
   if (currentRoll >= MAX_ROLLS) {
     canFinishRound = true
   }
+}
+
+function updateAimIndicator(start, current) {
+  const dx = current.x - start.x
+  const dy = current.y - start.y
+  const length = Math.min(160, Math.hypot(dx, dy))
+  const angle = Math.atan2(dy, dx)
+  aimIndicator.style.left = `${start.x}px`
+  aimIndicator.style.top = `${start.y}px`
+  aimIndicator.style.width = `${length}px`
+  aimIndicator.style.transform = `rotate(${angle}rad)`
+  aimIndicator.classList.toggle('visible', length > 8)
+}
+
+function hideAimIndicator() {
+  aimIndicator.classList.remove('visible')
+}
+
+function releaseAimPointer(pointerId) {
+  if (canvas.hasPointerCapture(pointerId)) {
+    canvas.releasePointerCapture(pointerId)
+  }
+}
+
+function clearPendingAim() {
+  if (pendingAimTimer != null) {
+    clearTimeout(pendingAimTimer)
+  }
+  pendingAimTimer = null
+  pendingAimData = null
+}
+
+function startAimFromPointer(pointerData) {
+  if (!activePointers.has(pointerData.pointerId)) return
+  if (activePointers.size !== 1 || pinchInProgress) return
+  if (rollInProgress || activePointerId != null) return
+  if (pendingRoundReset || canFinishRound || currentRoll >= MAX_ROLLS) {
+    rollDice()
+    return
+  }
+
+  const floorPoint = getFloorPointFromScreen(pointerData.clientX, pointerData.clientY)
+  if (!floorPoint) return
+
+  activePointerId = pointerData.pointerId
+  aimInProgress = true
+  aimStartWorld = floorPoint.clone()
+  aimCurrentWorld = floorPoint.clone()
+  dragStartScreen.set(pointerData.clientX, pointerData.clientY)
+  dragCurrentScreen.copy(dragStartScreen)
+  placeRollableDice(aimStartWorld, true)
+  updateAimIndicator(dragStartScreen, dragCurrentScreen)
+}
+
+function beginAim(event) {
+  activePointers.set(event.pointerId, {
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  })
+  canvas.setPointerCapture(event.pointerId)
+
+  if (activePointers.size >= 2) {
+    clearPendingAim()
+    beginPinchZoom()
+    return
+  }
+
+  const pointerData = {
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  }
+  if (event.pointerType === 'touch') {
+    clearPendingAim()
+    pendingAimData = pointerData
+    pendingAimTimer = setTimeout(() => {
+      const data = pendingAimData
+      clearPendingAim()
+      if (data) startAimFromPointer(data)
+    }, 140)
+    return
+  }
+
+  startAimFromPointer(pointerData)
+}
+
+function updateAim(event) {
+  if (activePointers.has(event.pointerId)) {
+    activePointers.set(event.pointerId, {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    })
+  }
+  if (pendingAimData?.pointerId === event.pointerId) {
+    pendingAimData = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    }
+  }
+  if (pinchInProgress) {
+    updatePinchZoom()
+    return
+  }
+
+  if (!aimInProgress || event.pointerId !== activePointerId) return
+  const floorPoint = getFloorPointFromPointer(event)
+  if (floorPoint) aimCurrentWorld = floorPoint.clone()
+  placeRollableDice(aimCurrentWorld, true)
+  dragCurrentScreen.set(event.clientX, event.clientY)
+  updateAimIndicator(dragStartScreen, dragCurrentScreen)
+}
+
+function finishAim(event) {
+  if (pinchInProgress) {
+    activePointers.delete(event.pointerId)
+    releaseAimPointer(event.pointerId)
+    endPinchZoom()
+    return
+  }
+
+  if (pendingAimData?.pointerId === event.pointerId) {
+    clearPendingAim()
+  }
+  activePointers.delete(event.pointerId)
+  releaseAimPointer(event.pointerId)
+  if (!aimInProgress || event.pointerId !== activePointerId) return
+  const floorPoint = getFloorPointFromPointer(event)
+  if (floorPoint) aimCurrentWorld = floorPoint.clone()
+  placeRollableDice(aimCurrentWorld, true)
+  const launch = getLaunchFromDrag(aimStartWorld, aimCurrentWorld)
+  aimInProgress = false
+  activePointerId = null
+  hideAimIndicator()
+  if (launch) {
+    rollDice(launch)
+  } else {
+    releaseAimedDice()
+  }
+}
+
+function cancelAim(event) {
+  if (pendingAimData?.pointerId === event.pointerId) {
+    clearPendingAim()
+  }
+  activePointers.delete(event.pointerId)
+  if (pinchInProgress) {
+    releaseAimPointer(event.pointerId)
+    endPinchZoom()
+    return
+  }
+
+  if (!aimInProgress || event.pointerId !== activePointerId) return
+  aimInProgress = false
+  activePointerId = null
+  hideAimIndicator()
+  releaseAimPointer(event.pointerId)
+  releaseAimedDice()
 }
 
 diceCountSelect.addEventListener('change', (event) => {
@@ -999,8 +1631,32 @@ diceFacesSelect.addEventListener('change', (event) => {
   closeMenu()
 })
 
-canvas.addEventListener('click', rollDice)
+frictionSlider.addEventListener('input', (event) => {
+  setGroundFriction(Number(event.target.value))
+})
+
+diceFrictionSlider.addEventListener('input', (event) => {
+  setDiceFriction(Number(event.target.value))
+})
+
+massSlider.addEventListener('input', (event) => {
+  setDieMass(Number(event.target.value))
+})
+
+throwForceSlider.addEventListener('input', (event) => {
+  setThrowForce(Number(event.target.value))
+})
+
+throwAngleSlider.addEventListener('input', (event) => {
+  setThrowAltitudeAngle(Number(event.target.value))
+})
+
+canvas.addEventListener('pointerdown', beginAim)
+canvas.addEventListener('pointermove', updateAim)
+canvas.addEventListener('pointerup', finishAim)
+canvas.addEventListener('pointercancel', cancelAim)
 menuButton.addEventListener('click', toggleMenu)
+tuningButton.addEventListener('click', toggleTuningMenu)
 languageToggle.addEventListener('click', toggleLanguage)
 resetButton.addEventListener('click', () => createDice(Number(diceCountSelect.value)))
 
@@ -1009,26 +1665,48 @@ function animate() {
 
   const delta = clock.getDelta()
   world.step(timeStep, delta, 3)
-  dice.forEach(clampDieBounds)
+  if (aimInProgress && aimCurrentWorld) {
+    placeRollableDice(aimCurrentWorld, true)
+  }
   syncPhysics()
   finalizeRollingDice()
-  animateCameraZoom(delta)
+  updateCameraFrame(delta)
 
   renderer.render(scene, camera)
 }
 
-function animateCameraZoom(delta) {
-  if (cameraZoomTimer >= 0.4) {
-    camera.position.set(0, 4, 8)
-    camera.lookAt(0, 0, 0)
-    return
+function updateCameraFrame(delta) {
+  applyCameraFrame(delta)
+}
+
+function getVisibleDiceBounds() {
+  const visibleDice = dice.filter(dieData => !dieData.kept && dieData.mesh.visible)
+  if (visibleDice.length === 0) {
+    return {
+      center: new THREE.Vector3(0, FLOOR_Y + 0.5, 0),
+      radius: CAMERA_FALLBACK_RADIUS,
+    }
   }
 
-  cameraZoomTimer += delta
-  const t = Math.min(1, cameraZoomTimer / 0.4)
-  const pulse = Math.sin(t * Math.PI)
-  camera.position.set(0, 4 + pulse * 0.4, 8 + pulse * 0.8)
-  camera.lookAt(0, 0, 0)
+  const box = new THREE.Box3()
+  for (const dieData of visibleDice) {
+    dieData.mesh.updateWorldMatrix(true, false)
+    box.expandByObject(dieData.mesh)
+  }
+
+  const center = box.getCenter(new THREE.Vector3())
+  const size = box.getSize(new THREE.Vector3())
+  const radius = Math.max(CAMERA_FALLBACK_RADIUS, size.length() * 0.5 + 0.45)
+  center.y = Math.max(center.y, FLOOR_Y + 0.45)
+
+  return { center, radius }
+}
+
+function getCameraDistanceForRadius(radius) {
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov)
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect)
+  const limitingFov = Math.min(verticalFov, horizontalFov)
+  return Math.max(6, (radius * CAMERA_MARGIN) / Math.sin(limitingFov / 2))
 }
 
 applyLocalization()
