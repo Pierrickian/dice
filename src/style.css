@@ -40,7 +40,7 @@ body,
   padding: 10px;
   border: none;
   background: rgba(18, 20, 34, 0.9);
-  border-radius: 14px;
+  border-radius: 11px;
   cursor: pointer;
   pointer-events: auto;
   z-index: 31;
@@ -57,9 +57,9 @@ body,
   justify-content: center;
   border: none;
   background: rgba(18, 20, 34, 0.9);
-  border-radius: 14px;
+  border-radius: 11px;
   color: white;
-  font-size: clamp(1.05rem, 3vw, 1.45rem);
+  font-size: clamp(0.95rem, 2.5vw, 1.2rem);
   font-weight: 900;
   cursor: pointer;
   pointer-events: auto;
@@ -103,7 +103,7 @@ body,
   padding: 14px;
   background: rgba(18, 20, 34, 0.99);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
+  border-radius: 11px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
   pointer-events: auto;
   z-index: 30;
@@ -124,7 +124,7 @@ body,
   padding: 14px;
   background: rgba(18, 20, 34, 0.99);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
+  border-radius: 11px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
   pointer-events: auto;
   z-index: 30;
@@ -158,12 +158,12 @@ body,
 
 #roll-panel {
   position: absolute;
-  top: 86px;
+  top: 62px;
   left: 50%;
-  width: min(720px, calc(100vw - 32px));
+  width: min(620px, calc(100vw - 24px));
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   pointer-events: auto;
   transform: translateX(-50%);
   z-index: 10;
@@ -171,12 +171,12 @@ body,
 
 #roll-header {
   align-self: center;
-  padding: 8px 16px;
+  padding: 5px 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   background: rgba(18, 20, 34, 0.54);
   color: #f7f7fb;
-  font-size: clamp(1rem, 2.4vw, 1.35rem);
+  font-size: clamp(0.88rem, 2.1vw, 1.05rem);
   font-weight: 750;
   letter-spacing: 0.01em;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
@@ -186,20 +186,20 @@ body,
 .dice-buttons {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .dice-value-button {
   width: 100%;
-  min-height: clamp(56px, 11vw, 76px);
+  min-height: clamp(42px, 8.5vw, 58px);
   border: 2px solid rgba(255, 255, 255, 0.16);
-  border-radius: 20px;
+  border-radius: 12px;
   color: white;
-  font-size: clamp(1.05rem, 3vw, 1.45rem);
+  font-size: clamp(0.92rem, 2.4vw, 1.15rem);
   font-weight: 900;
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
-  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.24);
 }
 
 .dice-value-button.kept {
@@ -213,14 +213,12 @@ body,
 }
 
 .dice-value-button.objective-match {
-  opacity: 1;
-  filter: saturate(1.25) brightness(1.12);
-  box-shadow: 0 0 0 2px rgba(90, 214, 139, 0.65), 0 16px 32px rgba(90, 214, 139, 0.24);
+  /* Uses the normal active result-button state so kept/pressed remains readable. */
 }
 
 .dice-value-button.objective-miss {
-  opacity: 0.42;
-  filter: grayscale(0.65) brightness(0.72);
+  opacity: 0.5;
+  filter: grayscale(0.55) brightness(0.76);
 }
 
 @keyframes dice-pulse {
@@ -242,9 +240,9 @@ body,
 
 #roll-controls button {
   flex: 1;
-  min-height: 48px;
-  padding: 12px 16px;
-  border-radius: 18px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 11px;
   border: none;
   background: rgba(255, 255, 255, 0.12);
   color: white;
@@ -278,10 +276,10 @@ body,
 #objective-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: clamp(14px, 3vw, 20px);
+  gap: 8px;
+  padding: clamp(10px, 2.2vw, 14px);
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 24px;
+  border-radius: 18px;
   background: linear-gradient(180deg, rgba(18, 20, 34, 0.9), rgba(13, 15, 28, 0.78));
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(18px);
@@ -315,17 +313,17 @@ body,
 
 .objective-reel {
   min-width: 0;
-  width: clamp(1.85rem, 8vw, 3rem);
-  height: clamp(2.25rem, 9vw, 3.35rem);
+  width: clamp(1.55rem, 6.8vw, 2.35rem);
+  height: clamp(1.95rem, 7.2vw, 2.7rem);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
+  border-radius: 11px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07));
   color: #ffffff;
-  font-size: clamp(1.35rem, 4.8vw, 2rem);
+  font-size: clamp(1.08rem, 3.8vw, 1.55rem);
   font-weight: 950;
   box-shadow: inset 0 -12px 20px rgba(0, 0, 0, 0.18), 0 10px 24px rgba(0, 0, 0, 0.22);
 }
@@ -336,13 +334,13 @@ body,
 }
 
 #objective-reroll-button {
-  min-height: clamp(2.25rem, 9vw, 3.35rem);
+  min-height: clamp(1.95rem, 7.2vw, 2.7rem);
   padding: 0 clamp(10px, 2.4vw, 18px);
   border: none;
-  border-radius: 16px;
+  border-radius: 12px;
   background: linear-gradient(135deg, #ffe05a, #f4b000);
   color: #211700;
-  font-size: clamp(0.72rem, 2.4vw, 0.95rem);
+  font-size: clamp(0.64rem, 2vw, 0.82rem);
   font-weight: 950;
   white-space: nowrap;
   box-shadow: 0 12px 28px rgba(244, 176, 0, 0.24);
@@ -371,7 +369,7 @@ body,
 
 #objective-status {
   color: #ffd700;
-  font-size: clamp(0.9rem, 2.4vw, 1rem);
+  font-size: clamp(0.78rem, 2vw, 0.9rem);
   font-weight: 850;
 }
 
@@ -514,8 +512,8 @@ body,
 
 @media (max-width: 420px) {
   #roll-panel {
-    top: 82px;
-    gap: 10px;
+    top: 58px;
+    gap: 7px;
   }
 
   #objective-row {

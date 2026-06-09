@@ -36,7 +36,7 @@ const TRANSLATIONS = {
     rerollObjectiveButton: 'Relancer objectif',
     toggleLanguageLabel: 'Passer en anglais',
     toggleLanguageFlag: '🇬🇧',
-    rollHeader: (current, max) => `Lancer ${current} / ${max}`,
+    rollHeader: (current, max) => `${Math.max(0, max - current)} lancer${Math.max(0, max - current) > 1 ? 's' : ''} restant${Math.max(0, max - current) > 1 ? 's' : ''}`,
     scoreDisplay: score => `Score : ${score}`,
     objectiveTitle: 'Objectif',
     objectiveWaiting: 'Lance les dés pour tenter cette combinaison.',
@@ -58,7 +58,7 @@ const TRANSLATIONS = {
     rerollObjectiveButton: 'Reroll objective',
     toggleLanguageLabel: 'Switch to French',
     toggleLanguageFlag: '🇫🇷',
-    rollHeader: (current, max) => `Roll ${current} / ${max}`,
+    rollHeader: (current, max) => `${Math.max(0, max - current)} roll${Math.max(0, max - current) === 1 ? '' : 's'} left`,
     scoreDisplay: score => `Score: ${score}`,
     objectiveTitle: 'Objective',
     objectiveWaiting: 'Roll the dice to attempt this combination.',
@@ -290,13 +290,13 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   1000
 )
-const CAMERA_DEFAULT_POSITION = new THREE.Vector3(0, 5.4, 7.3)
+const CAMERA_DEFAULT_POSITION = new THREE.Vector3(0, 4.7, 6.35)
 const CAMERA_DEFAULT_TARGET = new THREE.Vector3(0, 0, 0)
 camera.position.copy(CAMERA_DEFAULT_POSITION)
 camera.lookAt(CAMERA_DEFAULT_TARGET)
 const cameraTarget = CAMERA_DEFAULT_TARGET.clone()
 const cameraOffset = CAMERA_DEFAULT_POSITION.clone().sub(CAMERA_DEFAULT_TARGET)
-const CAMERA_SCREEN_LOWER_TARGET_OFFSET = 3.4
+const CAMERA_SCREEN_LOWER_TARGET_OFFSET = 4.0
 const raycaster = new THREE.Raycaster()
 const pointerNdc = new THREE.Vector2()
 const dragStartScreen = new THREE.Vector2()
@@ -520,7 +520,7 @@ const D6_FACE_NORMALS = [
   { value: 6, normal: new THREE.Vector3(0, -1, 0) },
 ]
 const CAMERA_FALLBACK_RADIUS = 1.4
-const CAMERA_MARGIN = 1.12
+const CAMERA_MARGIN = 1.02
 const CAMERA_PAN_MAX_FACTOR = 0.75
 const MAX_DRAG_DISTANCE = 2.8
 const AIM_SUSPEND_HEIGHT = 2.15
@@ -582,9 +582,8 @@ scene.add(handSphere)
 
 function getKeepableDice() {
   if (isObjectiveMode()) {
-    return new Set(dice
-      .map((dieData, index) => dieData.value != null ? index : -1)
-      .filter(index => index !== -1))
+    if (hasObjectiveReelsSpinning()) return new Set()
+    return getObjectiveMatchedDieIndices()
   }
   const values = dice.map(d => d.value)
   return computeEligibleIndices(values)
@@ -864,12 +863,15 @@ function renderDiceButtons() {
     button.classList.toggle('rolling', dieData.rolling)
     button.classList.toggle('objective-match', canShowObjectiveMatches && objectiveMatchedDice.has(index))
     button.classList.toggle('objective-miss', canShowObjectiveMatches && dieData.value != null && !objectiveMatchedDice.has(index))
-    if (!keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS) {
-      button.classList.add('disabled')
-    }
+    const isDisabledResult = isObjectiveMode()
+      ? canShowObjectiveMatches && dieData.value != null && !objectiveMatchedDice.has(index)
+      : !keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS
+    if (isDisabledResult) button.classList.add('disabled')
 
     button.addEventListener('click', () => {
-      if (currentRoll === 0 || dieData.rolling || (!keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS)) return
+      const cannotToggleObjectiveDie = isObjectiveMode() && !dieData.kept && !keepable.has(index)
+      const cannotToggleZerotonineDie = !isObjectiveMode() && !keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS
+      if (currentRoll === 0 || dieData.rolling || cannotToggleObjectiveDie || cannotToggleZerotonineDie) return
       dieData.kept = !dieData.kept
       button.classList.toggle('kept', dieData.kept)
       dieData.mesh.visible = !dieData.kept
@@ -1845,7 +1847,7 @@ function getCameraFrame() {
   target.y += CAMERA_SCREEN_LOWER_TARGET_OFFSET
   const distance = Math.max(
     cameraOffset.length(),
-    getCameraDistanceForRadius(bounds.radius)
+    getCameraDistanceForBounds(bounds)
   ) * cameraZoomScale
   const position = target.clone().add(
     cameraOffset.clone().normalize().multiplyScalar(distance)
@@ -2225,14 +2227,17 @@ function getVisibleDiceBounds() {
   const radius = Math.max(CAMERA_FALLBACK_RADIUS, size.length() * 0.5 + 0.45)
   center.y = Math.max(center.y, FLOOR_Y + 0.45)
 
-  return { center, radius }
+  return { center, radius, size }
 }
 
-function getCameraDistanceForRadius(radius) {
+function getCameraDistanceForBounds(bounds) {
   const verticalFov = THREE.MathUtils.degToRad(camera.fov)
   const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect)
-  const limitingFov = Math.min(verticalFov, horizontalFov)
-  return Math.max(6, (radius * CAMERA_MARGIN) / Math.sin(limitingFov / 2))
+  const horizontalSpan = Math.max(bounds.size?.x || 0, (bounds.size?.z || 0) * 0.72, bounds.radius * 1.55)
+  const verticalSpan = Math.max(bounds.size?.y || 0, bounds.radius * 1.15)
+  const horizontalDistance = (horizontalSpan * CAMERA_MARGIN * 0.5) / Math.tan(horizontalFov / 2)
+  const verticalDistance = (verticalSpan * CAMERA_MARGIN * 0.5) / Math.tan(verticalFov / 2)
+  return Math.max(4.8, horizontalDistance, verticalDistance)
 }
 
 applyLocalization()
