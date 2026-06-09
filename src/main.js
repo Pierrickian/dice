@@ -400,19 +400,18 @@ const CAMERA_MARGIN = 1.12
 const CAMERA_PAN_MAX_FACTOR = 0.75
 const MAX_DRAG_DISTANCE = 2.8
 const AIM_SUSPEND_HEIGHT = 2.15
-const HAND_BASE_RADIUS = 1.15
-const HAND_RADIUS_PER_DIE = 0.08
-const HAND_DRAG_RADIUS_RANGE = 0.55
-const HAND_RESSAC_AMPLITUDE = 0.18
-const HAND_RESSAC_FREQUENCY = 1.35
-const HAND_RESSAC_SECONDARY_AMPLITUDE = 0.07
-const HAND_RESSAC_SECONDARY_FREQUENCY = 2.2
-const HAND_SPRING_STRENGTH = 42
-const HAND_COMPRESSION_BOOST = 36
-const HAND_DAMPING = 0.62
-const HAND_ANGULAR_DAMPING = 0.72
-const HAND_MAX_CONTAINMENT_DISTANCE = 0.82
-const HAND_ROLL_TORQUE = 0.000028
+const HAND_BASE_RADIUS = 1.55
+const HAND_RADIUS_PER_DIE = 0.12
+const HAND_DRAG_RADIUS_RANGE = 0.28
+const HAND_RESSAC_AMPLITUDE = 0.08
+const HAND_RESSAC_FREQUENCY = 0.85
+const HAND_RESSAC_SECONDARY_AMPLITUDE = 0.035
+const HAND_RESSAC_SECONDARY_FREQUENCY = 1.45
+const HAND_SPRING_STRENGTH = 22
+const HAND_COMPRESSION_BOOST = 12
+const HAND_DAMPING = 0.5
+const HAND_ANGULAR_DAMPING = 0.58
+const HAND_MAX_CONTAINMENT_DISTANCE = 1.15
 
 let dice = []
 let rollInProgress = false
@@ -1181,7 +1180,7 @@ function getHandRessacState(forceRatio, activeCount) {
 function getHandDiceOffset(index, count, radius) {
   if (count <= 1) return new THREE.Vector3(0, 0, 0)
   const angle = (index / count) * Math.PI * 2
-  const ringRadius = Math.min(radius * 0.24, HAND_MAX_CONTAINMENT_DISTANCE)
+  const ringRadius = Math.min(radius * 0.3, HAND_MAX_CONTAINMENT_DISTANCE)
   return new THREE.Vector3(
     Math.cos(angle) * ringRadius,
     (index % 2) * 0.12 - 0.06,
@@ -1200,8 +1199,8 @@ function updateHandSphere(center, forceRatio = getAimForceRatio()) {
   const ressac = getHandRessacState(forceRatio, activeDice.length)
   handSphereCenter = center.clone()
   handSphereCenter.y = FLOOR_Y + AIM_SUSPEND_HEIGHT
-  handSphereCenter.x += Math.sin(ressac.elapsed * Math.PI * 1.2) * 0.04
-  handSphereCenter.z += Math.cos(ressac.elapsed * Math.PI * 1.45) * 0.04
+  handSphereCenter.x += Math.sin(ressac.elapsed * Math.PI * 0.75) * 0.025
+  handSphereCenter.z += Math.cos(ressac.elapsed * Math.PI * 0.9) * 0.025
   handSphereRadius = ressac.radius
   handSphere.position.copy(handSphereCenter)
   handSphere.scale.setScalar(handSphereRadius)
@@ -1231,13 +1230,6 @@ function beginHandAim(center) {
       handSphereCenter.z + offset.z
     )
     body.velocity.set(0, 0, 0)
-    body.angularVelocity.set(
-      (Math.random() - 0.5) * 0.8,
-      (Math.random() - 0.5) * 0.8,
-      (Math.random() - 0.5) * 0.8
-    )
-    body.quaternion.set(Math.random(), Math.random(), Math.random(), Math.random())
-    body.quaternion.normalize()
     body.updateMassProperties()
     body.wakeUp()
   })
@@ -1270,26 +1262,6 @@ function applyHandSphereForces() {
       .sub(velocity.multiplyScalar((1.2 + ressac.compression * 0.9) * getSimulatedDieMassKg()))
 
     body.applyForce(new CANNON.Vec3(force.x, force.y, force.z), body.position)
-
-    const torquePhase = ressac.elapsed * Math.PI * 2 * (0.45 + index * 0.07)
-    const torque = HAND_ROLL_TORQUE * (0.45 + ressac.compression)
-    body.torque.vadd(new CANNON.Vec3(
-      Math.sin(torquePhase + index) * torque,
-      Math.cos(torquePhase * 0.8 + index * 0.5) * torque,
-      Math.sin(torquePhase * 1.15 + index * 0.25) * torque
-    ), body.torque)
-
-    const fromCenter = position.sub(handSphereCenter)
-    const maxDistance = Math.max(0.24, handSphereRadius - DICE_TARGET_SIZE_CM * 0.5)
-    if (fromCenter.length() > maxDistance) {
-      fromCenter.setLength(maxDistance)
-      body.position.set(
-        handSphereCenter.x + fromCenter.x,
-        handSphereCenter.y + fromCenter.y,
-        handSphereCenter.z + fromCenter.z
-      )
-      body.velocity.scale(0.62, body.velocity)
-    }
     body.wakeUp()
   })
 }
@@ -1366,16 +1338,11 @@ function getDieFaceNormals(dieData) {
   return dieData.mesh.geometry.userData.faceNormals || []
 }
 
-function wakeUpBodyTiltAngle(dieData) {
+function wakeUpBodyForNaturalSettle(dieData) {
   const body = dieData.body
   if (body.velocity.length() >= 0.08 || body.angularVelocity.length() >= 0.08) return
 
   body.wakeUp()
-  body.angularVelocity.set(
-    body.angularVelocity.x + (Math.random() - 0.5) * 1.2,
-    body.angularVelocity.y,
-    body.angularVelocity.z + (Math.random() - 0.5) * 1.2
-  )
 }
 
 function isDieSettledOnFace(dieData) {
@@ -1391,7 +1358,7 @@ function isDieSettledOnFace(dieData) {
 
   if (bestDot >= FACE_SETTLE_DOT) return true
 
-  wakeUpBodyTiltAngle(dieData)
+  wakeUpBodyForNaturalSettle(dieData)
   return false
 }
 
