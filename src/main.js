@@ -400,22 +400,12 @@ const CAMERA_MARGIN = 1.12
 const CAMERA_PAN_MAX_FACTOR = 0.75
 const MAX_DRAG_DISTANCE = 2.8
 const AIM_SUSPEND_HEIGHT = 2.15
-const HAND_BASE_RADIUS = 1.55
-const HAND_RADIUS_PER_DIE = 0.12
-const HAND_DRAG_RADIUS_RANGE = 0.28
-const HAND_RESSAC_AMPLITUDE = 0.08
-const HAND_RESSAC_FREQUENCY = 0.85
-const HAND_RESSAC_SECONDARY_AMPLITUDE = 0.035
-const HAND_RESSAC_SECONDARY_FREQUENCY = 1.45
-const HAND_SPRING_STRENGTH = 22
-const HAND_COMPRESSION_BOOST = 12
-const HAND_DAMPING = 0.5
-const HAND_ANGULAR_DAMPING = 0.58
-const HAND_MAX_CONTAINMENT_DISTANCE = 1.15
-const HAND_MAX_CENTER_STEP = 0.18
-const HAND_MAX_DICE_SPEED = 1.15
+const HAND_RADIUS = 2.05
+const HAND_DAMPING = 0.58
+const HAND_ANGULAR_DAMPING = 0.62
+const HAND_MAX_DICE_SPEED = 1.05
 const HAND_MAX_ANGULAR_SPEED = 4.5
-const HAND_BOUNDARY_RESTITUTION = 0.12
+const HAND_BOUNDARY_RESTITUTION = 0.08
 
 let dice = []
 let rollInProgress = false
@@ -423,8 +413,7 @@ let aimInProgress = false
 let aimStartWorld = null
 let aimCurrentWorld = null
 let handSphereCenter = null
-let handSphereRadius = HAND_BASE_RADIUS
-let handAimStartedAt = 0
+let handSphereRadius = HAND_RADIUS
 let activePointerId = null
 let pendingAimTimer = null
 let pendingAimData = null
@@ -1162,29 +1151,10 @@ function getRollableDice() {
   return dice.filter(dieData => !dieData.kept || currentRoll === 0)
 }
 
-function getHandBaseRadius(forceRatio, activeCount) {
-  return HAND_BASE_RADIUS + Math.max(0, activeCount - 1) * HAND_RADIUS_PER_DIE + forceRatio * HAND_DRAG_RADIUS_RANGE
-}
-
-function getHandRessacState(forceRatio, activeCount) {
-  const elapsed = handAimStartedAt > 0 ? (performance.now() - handAimStartedAt) / 1000 : 0
-  const primaryPhase = elapsed * Math.PI * 2 * HAND_RESSAC_FREQUENCY
-  const secondaryPhase = elapsed * Math.PI * 2 * HAND_RESSAC_SECONDARY_FREQUENCY + Math.PI / 3
-  const radiusWave = Math.sin(primaryPhase) * HAND_RESSAC_AMPLITUDE +
-    Math.sin(secondaryPhase) * HAND_RESSAC_SECONDARY_AMPLITUDE
-  const compression = Math.max(0, -radiusWave / (HAND_RESSAC_AMPLITUDE + HAND_RESSAC_SECONDARY_AMPLITUDE))
-  const baseRadius = getHandBaseRadius(forceRatio, activeCount)
-  return {
-    elapsed,
-    compression,
-    radius: Math.max(0.72, baseRadius + radiusWave),
-  }
-}
-
-function getHandDiceOffset(index, count, radius) {
+function getHandDiceOffset(index, count) {
   if (count <= 1) return new THREE.Vector3(0, 0, 0)
   const angle = (index / count) * Math.PI * 2
-  const ringRadius = Math.min(radius * 0.3, HAND_MAX_CONTAINMENT_DISTANCE)
+  const ringRadius = Math.min(HAND_RADIUS * 0.32, HAND_RADIUS - DICE_TARGET_SIZE_CM * 0.75)
   return new THREE.Vector3(
     Math.cos(angle) * ringRadius,
     (index % 2) * 0.12 - 0.06,
@@ -1192,56 +1162,21 @@ function getHandDiceOffset(index, count, radius) {
   )
 }
 
-function getAimForceRatio() {
-  if (!aimStartWorld || !aimCurrentWorld) return 0
-  const distance = aimStartWorld.clone().sub(aimCurrentWorld).setY(0).length()
-  return Math.min(1, distance / MAX_DRAG_DISTANCE)
-}
-
-function updateHandSphere(center, forceRatio = getAimForceRatio()) {
-  const activeDice = getRollableDice()
-  const ressac = getHandRessacState(forceRatio, activeDice.length)
-  const previousCenter = handSphereCenter?.clone() || null
-  const nextCenter = center.clone()
-  nextCenter.y = FLOOR_Y + AIM_SUSPEND_HEIGHT
-  nextCenter.x += Math.sin(ressac.elapsed * Math.PI * 0.75) * 0.025
-  nextCenter.z += Math.cos(ressac.elapsed * Math.PI * 0.9) * 0.025
-
-  if (previousCenter) {
-    const movement = nextCenter.clone().sub(previousCenter)
-    if (movement.length() > HAND_MAX_CENTER_STEP) {
-      nextCenter.copy(previousCenter).add(movement.setLength(HAND_MAX_CENTER_STEP))
-    }
-  }
-
-  handSphereCenter = nextCenter
-  handSphereRadius = ressac.radius
+function updateHandSphere(center) {
+  handSphereCenter = center.clone()
+  handSphereCenter.y = FLOOR_Y + AIM_SUSPEND_HEIGHT
+  handSphereRadius = HAND_RADIUS
   handSphere.position.copy(handSphereCenter)
   handSphere.scale.setScalar(handSphereRadius)
   handSphere.visible = true
-
-  if (previousCenter) {
-    moveAimedDiceWithHand(handSphereCenter.clone().sub(previousCenter))
-  }
-  return ressac
-}
-
-function moveAimedDiceWithHand(delta) {
-  if (delta.lengthSq() === 0) return
-  getRollableDice().forEach((dieData) => {
-    const body = dieData.body
-    body.position.vadd(new CANNON.Vec3(delta.x, delta.y, delta.z), body.position)
-    body.velocity.scale(0.72, body.velocity)
-  })
 }
 
 function beginHandAim(center) {
-  handAimStartedAt = performance.now()
   const activeDice = getRollableDice()
-  updateHandSphere(center, 0)
+  updateHandSphere(center)
   activeDice.forEach((dieData, index) => {
     const body = dieData.body
-    const offset = getHandDiceOffset(index, activeDice.length, handSphereRadius)
+    const offset = getHandDiceOffset(index, activeDice.length)
     dieData.value = null
     dieData.rolling = false
     dieData.mesh.visible = true
@@ -1270,28 +1205,6 @@ function moveHandAim(center) {
     return
   }
   updateHandSphere(center)
-}
-
-function applyHandSphereForces() {
-  if (!aimInProgress || !handSphereCenter) return
-
-  const activeDice = getRollableDice()
-  const ressac = getHandRessacState(getAimForceRatio(), activeDice.length)
-  activeDice.forEach((dieData, index) => {
-    const body = dieData.body
-    const offset = getHandDiceOffset(index, activeDice.length, handSphereRadius)
-    const target = handSphereCenter.clone().add(offset)
-    const position = new THREE.Vector3(body.position.x, body.position.y, body.position.z)
-    const toTarget = target.sub(position)
-    const velocity = new THREE.Vector3(body.velocity.x, body.velocity.y, body.velocity.z)
-    const springStrength = HAND_SPRING_STRENGTH + ressac.compression * HAND_COMPRESSION_BOOST
-    const force = toTarget.multiplyScalar(springStrength * getSimulatedDieMassKg())
-      .sub(velocity.multiplyScalar((1.2 + ressac.compression * 0.9) * getSimulatedDieMassKg()))
-
-    body.applyForce(new CANNON.Vec3(force.x, force.y, force.z), body.position)
-    limitAimedDieVelocity(body)
-    body.wakeUp()
-  })
 }
 
 function containAimedDiceInHandSphere() {
@@ -1331,7 +1244,6 @@ function limitAimedDieVelocity(body) {
 function hideHandSphere() {
   handSphere.visible = false
   handSphereCenter = null
-  handAimStartedAt = 0
 }
 
 function releaseAimedDice() {
@@ -1400,11 +1312,17 @@ function getDieFaceNormals(dieData) {
   return dieData.mesh.geometry.userData.faceNormals || []
 }
 
-function wakeUpBodyForNaturalSettle(dieData) {
+function wakeUpBodyTiltAngle(dieData) {
   const body = dieData.body
   if (body.velocity.length() >= 0.08 || body.angularVelocity.length() >= 0.08) return
 
   body.wakeUp()
+  // Keep this tilt wake-up: it helps dice leave edge/chamfer stalls and settle flat on a face.
+  body.angularVelocity.set(
+    body.angularVelocity.x + (Math.random() - 0.5) * 1.2,
+    body.angularVelocity.y,
+    body.angularVelocity.z + (Math.random() - 0.5) * 1.2
+  )
 }
 
 function isDieSettledOnFace(dieData) {
@@ -1420,7 +1338,7 @@ function isDieSettledOnFace(dieData) {
 
   if (bestDot >= FACE_SETTLE_DOT) return true
 
-  wakeUpBodyForNaturalSettle(dieData)
+  wakeUpBodyTiltAngle(dieData)
   return false
 }
 
@@ -1865,7 +1783,7 @@ function animate() {
   const delta = clock.getDelta()
   if (aimInProgress && aimCurrentWorld) {
     moveHandAim(aimCurrentWorld)
-    applyHandSphereForces()
+    containAimedDiceInHandSphere()
   }
   world.step(timeStep, delta, 3)
   containAimedDiceInHandSphere()
