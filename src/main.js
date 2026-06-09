@@ -412,6 +412,10 @@ const HAND_COMPRESSION_BOOST = 12
 const HAND_DAMPING = 0.5
 const HAND_ANGULAR_DAMPING = 0.58
 const HAND_MAX_CONTAINMENT_DISTANCE = 1.15
+const HAND_MAX_CENTER_STEP = 0.18
+const HAND_MAX_DICE_SPEED = 1.15
+const HAND_MAX_ANGULAR_SPEED = 4.5
+const HAND_BOUNDARY_RESTITUTION = 0.12
 
 let dice = []
 let rollInProgress = false
@@ -1197,15 +1201,38 @@ function getAimForceRatio() {
 function updateHandSphere(center, forceRatio = getAimForceRatio()) {
   const activeDice = getRollableDice()
   const ressac = getHandRessacState(forceRatio, activeDice.length)
-  handSphereCenter = center.clone()
-  handSphereCenter.y = FLOOR_Y + AIM_SUSPEND_HEIGHT
-  handSphereCenter.x += Math.sin(ressac.elapsed * Math.PI * 0.75) * 0.025
-  handSphereCenter.z += Math.cos(ressac.elapsed * Math.PI * 0.9) * 0.025
+  const previousCenter = handSphereCenter?.clone() || null
+  const nextCenter = center.clone()
+  nextCenter.y = FLOOR_Y + AIM_SUSPEND_HEIGHT
+  nextCenter.x += Math.sin(ressac.elapsed * Math.PI * 0.75) * 0.025
+  nextCenter.z += Math.cos(ressac.elapsed * Math.PI * 0.9) * 0.025
+
+  if (previousCenter) {
+    const movement = nextCenter.clone().sub(previousCenter)
+    if (movement.length() > HAND_MAX_CENTER_STEP) {
+      nextCenter.copy(previousCenter).add(movement.setLength(HAND_MAX_CENTER_STEP))
+    }
+  }
+
+  handSphereCenter = nextCenter
   handSphereRadius = ressac.radius
   handSphere.position.copy(handSphereCenter)
   handSphere.scale.setScalar(handSphereRadius)
   handSphere.visible = true
+
+  if (previousCenter) {
+    moveAimedDiceWithHand(handSphereCenter.clone().sub(previousCenter))
+  }
   return ressac
+}
+
+function moveAimedDiceWithHand(delta) {
+  if (delta.lengthSq() === 0) return
+  getRollableDice().forEach((dieData) => {
+    const body = dieData.body
+    body.position.vadd(new CANNON.Vec3(delta.x, delta.y, delta.z), body.position)
+    body.velocity.scale(0.72, body.velocity)
+  })
 }
 
 function beginHandAim(center) {
@@ -1262,8 +1289,43 @@ function applyHandSphereForces() {
       .sub(velocity.multiplyScalar((1.2 + ressac.compression * 0.9) * getSimulatedDieMassKg()))
 
     body.applyForce(new CANNON.Vec3(force.x, force.y, force.z), body.position)
+    limitAimedDieVelocity(body)
     body.wakeUp()
   })
+}
+
+function containAimedDiceInHandSphere() {
+  if (!aimInProgress || !handSphereCenter) return
+
+  const maxDistance = Math.max(0.28, handSphereRadius - DICE_TARGET_SIZE_CM * 0.55)
+  const center = new CANNON.Vec3(handSphereCenter.x, handSphereCenter.y, handSphereCenter.z)
+  getRollableDice().forEach((dieData) => {
+    const body = dieData.body
+    const fromCenter = body.position.vsub(center)
+    const distance = fromCenter.length()
+
+    if (distance > maxDistance) {
+      const normal = fromCenter.scale(1 / Math.max(distance, 0.0001))
+      body.position.copy(center.vadd(normal.scale(maxDistance)))
+      const outwardSpeed = body.velocity.dot(normal)
+      if (outwardSpeed > 0) {
+        body.velocity.vsub(normal.scale(outwardSpeed * (1 + HAND_BOUNDARY_RESTITUTION)), body.velocity)
+      }
+    }
+
+    limitAimedDieVelocity(body)
+  })
+}
+
+function limitAimedDieVelocity(body) {
+  if (body.velocity.length() > HAND_MAX_DICE_SPEED) {
+    body.velocity.normalize()
+    body.velocity.scale(HAND_MAX_DICE_SPEED, body.velocity)
+  }
+  if (body.angularVelocity.length() > HAND_MAX_ANGULAR_SPEED) {
+    body.angularVelocity.normalize()
+    body.angularVelocity.scale(HAND_MAX_ANGULAR_SPEED, body.angularVelocity)
+  }
 }
 
 function hideHandSphere() {
@@ -1806,6 +1868,7 @@ function animate() {
     applyHandSphereForces()
   }
   world.step(timeStep, delta, 3)
+  containAimedDiceInHandSphere()
   syncPhysics()
   finalizeRollingDice()
   updateCameraFrame(delta)
