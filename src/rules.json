@@ -31,7 +31,7 @@
     },
     "rule_modes": {
       "description": "The player can choose the active rule set from the menu. Zerotonine preserves the original banking and scoring rules; Random Objective asks the player to roll a target multiset of face values without assigning colors to dice.",
-      "default": "zerotonine",
+      "default": "random_objective",
       "modes": [
         {
           "id": "zerotonine",

@@ -33,6 +33,7 @@ const TRANSLATIONS = {
     menuLabel: 'Menu',
     resetButton: 'Réinitialiser',
     tiltButton: 'Tilter la table',
+    rerollObjectiveButton: 'Relancer objectif',
     toggleLanguageLabel: 'Passer en anglais',
     toggleLanguageFlag: '🇬🇧',
     rollHeader: (current, max) => `Lancer ${current} / ${max}`,
@@ -54,6 +55,7 @@ const TRANSLATIONS = {
     menuLabel: 'Menu',
     resetButton: 'Reset',
     tiltButton: 'Tilt table',
+    rerollObjectiveButton: 'Reroll objective',
     toggleLanguageLabel: 'Switch to French',
     toggleLanguageFlag: '🇫🇷',
     rollHeader: (current, max) => `Roll ${current} / ${max}`,
@@ -189,8 +191,8 @@ app.innerHTML = `
       <div class="control-row">
         <label id="rule-mode-label" for="rule-mode">Règle</label>
         <select id="rule-mode">
-          <option value="zerotonine" selected>Zerotonine</option>
-          <option value="random_objective">Objectif aléatoire</option>
+          <option value="zerotonine">Zerotonine</option>
+          <option value="random_objective" selected>Objectif aléatoire</option>
         </select>
       </div>
     </div>
@@ -226,7 +228,10 @@ app.innerHTML = `
       <div id="score-display">Score : 0</div>
       <div id="objective-panel" hidden>
         <div id="objective-title">Objectif</div>
-        <div id="objective-values"></div>
+        <div id="objective-row">
+          <div id="objective-values" aria-live="polite"></div>
+          <button id="objective-reroll-button" type="button">Relancer objectif</button>
+        </div>
         <div id="objective-status"></div>
       </div>
       <div id="dice-buttons" class="dice-buttons"></div>
@@ -261,6 +266,7 @@ const scoreDisplay = document.querySelector('#score-display')
 const objectivePanel = document.querySelector('#objective-panel')
 const objectiveTitle = document.querySelector('#objective-title')
 const objectiveValuesDisplay = document.querySelector('#objective-values')
+const objectiveRerollButton = document.querySelector('#objective-reroll-button')
 const objectiveStatus = document.querySelector('#objective-status')
 const scoreAnimations = document.querySelector('#score-animations')
 const frictionSlider = document.querySelector('#friction-slider')
@@ -547,6 +553,8 @@ let pendingRoundReset = false
 let elapsedGameSeconds = 0
 let objectiveValues = []
 let objectiveMatched = false
+let objectiveSpinEndTimes = []
+let objectiveSpinDisplayValues = []
 let tiltUsesRemaining = 0
 let tiltActive = false
 let tiltElapsedSeconds = 0
@@ -605,7 +613,6 @@ function generateObjectiveValues(count, faceCount) {
   const objectiveCount = OBJECTIVE_RULES.use_current_dice_count ? count : count
   const objectiveFaceCount = OBJECTIVE_RULES.use_current_face_count ? faceCount : faceCount
   return Array.from({ length: objectiveCount }, () => Math.floor(Math.random() * objectiveFaceCount) + 1)
-    .sort((a, b) => a - b)
 }
 
 function getCurrentRolledValues() {
@@ -613,12 +620,123 @@ function getCurrentRolledValues() {
   return values.every(value => value != null) ? values : null
 }
 
+function getValueCounts(values) {
+  const counts = new Map()
+  values.forEach((value) => {
+    if (value == null) return
+    counts.set(value, (counts.get(value) || 0) + 1)
+  })
+  return counts
+}
+
+function reserveDiceForObjective({ keptOnly = false } = {}) {
+  const remaining = getValueCounts(objectiveValues)
+  const reserved = new Set()
+  const orderedDice = dice
+    .map((dieData, index) => ({ dieData, index }))
+    .filter(({ dieData }) => dieData.value != null && (!keptOnly || dieData.kept))
+    .sort((a, b) => Number(b.dieData.kept) - Number(a.dieData.kept) || a.index - b.index)
+
+  orderedDice.forEach(({ dieData, index }) => {
+    const count = remaining.get(dieData.value) || 0
+    if (count <= 0) return
+    reserved.add(index)
+    remaining.set(dieData.value, count - 1)
+  })
+
+  return reserved
+}
+
+function getObjectiveMatchedDieIndices() {
+  return isObjectiveMode() ? reserveDiceForObjective() : new Set()
+}
+
+function getUnreservedObjectiveSlotIndices() {
+  const keptCounts = getValueCounts(dice.filter(dieData => dieData.kept).map(dieData => dieData.value))
+  const unreserved = []
+  objectiveValues.forEach((value, index) => {
+    const count = keptCounts.get(value) || 0
+    if (count > 0) {
+      keptCounts.set(value, count - 1)
+    } else {
+      unreserved.push(index)
+    }
+  })
+  return unreserved
+}
+
 function valuesMatchObjective(values) {
   if (!values || values.length !== objectiveValues.length) return false
   const sortedValues = OBJECTIVE_RULES.match_order === 'any'
     ? [...values].sort((a, b) => a - b)
     : [...values]
-  return sortedValues.every((value, index) => value === objectiveValues[index])
+  const sortedObjective = OBJECTIVE_RULES.match_order === 'any'
+    ? [...objectiveValues].sort((a, b) => a - b)
+    : objectiveValues
+  return sortedValues.every((value, index) => value === sortedObjective[index])
+}
+
+function isObjectiveReelSpinning(index) {
+  return (objectiveSpinEndTimes[index] || 0) > elapsedGameSeconds
+}
+
+function hasObjectiveReelsSpinning() {
+  return objectiveValues.some((_, index) => isObjectiveReelSpinning(index))
+}
+
+function startObjectiveReelSpin(indices) {
+  indices.forEach((index) => {
+    objectiveSpinEndTimes[index] = elapsedGameSeconds + 2
+    objectiveSpinDisplayValues[index] = Math.floor(Math.random() * currentFaces) + 1
+  })
+  renderObjectiveReels()
+}
+
+function updateObjectiveReelAnimations() {
+  if (!isObjectiveMode()) return
+
+  let changed = false
+  objectiveValues.forEach((value, index) => {
+    if (!isObjectiveReelSpinning(index)) {
+      if (objectiveSpinDisplayValues[index] !== value) {
+        objectiveSpinDisplayValues[index] = value
+        changed = true
+      }
+      return
+    }
+
+    const nextDisplayValue = Math.floor(Math.random() * currentFaces) + 1
+    if (objectiveSpinDisplayValues[index] !== nextDisplayValue) {
+      objectiveSpinDisplayValues[index] = nextDisplayValue
+      changed = true
+    }
+  })
+
+  if (changed) renderObjectiveReels()
+}
+
+function renderObjectiveReels() {
+  objectiveValuesDisplay.innerHTML = ''
+  objectiveValues.forEach((value, index) => {
+    const reel = document.createElement('div')
+    reel.className = 'objective-reel'
+    if (isObjectiveReelSpinning(index)) reel.classList.add('spinning')
+    reel.textContent = objectiveSpinDisplayValues[index] ?? value
+    objectiveValuesDisplay.appendChild(reel)
+  })
+}
+
+function rerollUnreservedObjectiveSlots() {
+  if (!isObjectiveMode() || rollInProgress || hasObjectiveReelsSpinning()) return
+  const indices = getUnreservedObjectiveSlotIndices()
+  if (indices.length === 0) return
+
+  indices.forEach((index) => {
+    objectiveValues[index] = Math.floor(Math.random() * currentFaces) + 1
+  })
+  startObjectiveReelSpin(indices)
+  updateObjectiveUI()
+  renderDiceButtons()
 }
 
 function updateObjectiveUI() {
@@ -628,7 +746,7 @@ function updateObjectiveUI() {
   if (!isObjectiveMode()) return
 
   objectiveTitle.textContent = translations.objectiveTitle
-  objectiveValuesDisplay.textContent = translations.objectiveValues(objectiveValues)
+  renderObjectiveReels()
   const currentValues = getCurrentRolledValues()
   objectiveMatched = valuesMatchObjective(currentValues)
   objectiveStatus.textContent = objectiveMatched
@@ -637,6 +755,7 @@ function updateObjectiveUI() {
       ? translations.objectiveWaiting
       : translations.objectiveProgress
   objectivePanel.classList.toggle('complete', objectiveMatched)
+  objectiveRerollButton.disabled = rollInProgress || hasObjectiveReelsSpinning() || getUnreservedObjectiveSlotIndices().length === 0
 }
 
 function getDieColor(index) {
@@ -688,6 +807,7 @@ function applyLocalization() {
   populateRuleModeOptions()
   resetButton.textContent = translations.resetButton
   tiltButton.textContent = translations.tiltButton
+  objectiveRerollButton.textContent = translations.rerollObjectiveButton
   updateRollUI()
   updateScoreDisplay()
   updateObjectiveUI()
@@ -716,6 +836,7 @@ function renderDiceButtons() {
   diceButtonsContainer.innerHTML = ''
 
   const keepable = getKeepableDice()
+  const objectiveMatchedDice = getObjectiveMatchedDieIndices()
 
   dice.forEach((dieData, index) => {
     dieData.mesh.visible = !dieData.kept
@@ -734,6 +855,8 @@ function renderDiceButtons() {
     button.style.borderColor = `#${dieData.color.toString(16).padStart(6, '0')}`
     button.classList.toggle('kept', dieData.kept)
     button.classList.toggle('rolling', dieData.rolling)
+    button.classList.toggle('objective-match', isObjectiveMode() && objectiveMatchedDice.has(index))
+    button.classList.toggle('objective-miss', isObjectiveMode() && dieData.value != null && !objectiveMatchedDice.has(index))
     if (!keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS) {
       button.classList.add('disabled')
     }
@@ -1334,6 +1457,9 @@ function createDice(count) {
   scoreGain = 0
   objectiveMatched = false
   objectiveValues = isObjectiveMode() ? generateObjectiveValues(count, currentFaces) : []
+  objectiveSpinEndTimes = []
+  objectiveSpinDisplayValues = [...objectiveValues]
+  if (objectiveValues.length > 0) startObjectiveReelSpin(objectiveValues.map((_, index) => index))
   diceButtonsContainer.innerHTML = ''
 
   const radius = Math.min(2.5, 0.9 + (count - 1) * 0.3)
@@ -2043,6 +2169,7 @@ menuButton.addEventListener('click', toggleMenu)
 tuningButton.addEventListener('click', toggleTuningMenu)
 languageToggle.addEventListener('click', toggleLanguage)
 tiltButton.addEventListener('click', startTableTilt)
+objectiveRerollButton.addEventListener('click', rerollUnreservedObjectiveSlots)
 resetButton.addEventListener('click', () => createDice(Number(diceCountSelect.value)))
 
 function animate() {
@@ -2055,6 +2182,7 @@ function animate() {
     containAimedDiceInHandSphere()
   }
   updateTableTilt(delta)
+  updateObjectiveReelAnimations()
   world.step(timeStep, delta, 3)
   containAimedDiceInHandSphere()
   updateDiceFloorContactTimes()
