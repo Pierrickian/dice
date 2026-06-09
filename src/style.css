@@ -40,10 +40,10 @@ body,
   padding: 10px;
   border: none;
   background: rgba(18, 20, 34, 0.9);
-  border-radius: 14px;
+  border-radius: 11px;
   cursor: pointer;
   pointer-events: auto;
-  z-index: 4;
+  z-index: 31;
 }
 
 #tuning-button,
@@ -57,13 +57,13 @@ body,
   justify-content: center;
   border: none;
   background: rgba(18, 20, 34, 0.9);
-  border-radius: 14px;
+  border-radius: 11px;
   color: white;
-  font-size: 1rem;
-  font-weight: 800;
+  font-size: clamp(0.95rem, 2.5vw, 1.2rem);
+  font-weight: 900;
   cursor: pointer;
   pointer-events: auto;
-  z-index: 4;
+  z-index: 31;
 }
 
 #tuning-button {
@@ -103,9 +103,10 @@ body,
   padding: 14px;
   background: rgba(18, 20, 34, 0.99);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
+  border-radius: 11px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
   pointer-events: auto;
+  z-index: 30;
 }
 
 #menu-panel.open {
@@ -123,10 +124,10 @@ body,
   padding: 14px;
   background: rgba(18, 20, 34, 0.99);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
+  border-radius: 11px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
   pointer-events: auto;
-  z-index: 3;
+  z-index: 30;
 }
 
 #tuning-panel.open {
@@ -157,38 +158,48 @@ body,
 
 #roll-panel {
   position: absolute;
-  top: 70px;
-  right: 16px;
-  width: min(260px, calc(100vw - 32px));
+  top: 62px;
+  left: 50%;
+  width: min(620px, calc(100vw - 24px));
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   pointer-events: auto;
+  transform: translateX(-50%);
+  z-index: 10;
 }
 
 #roll-header {
-  font-size: 0.95rem;
-  color: #e8e8f0;
+  align-self: center;
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(18, 20, 34, 0.54);
+  color: #f7f7fb;
+  font-size: clamp(0.88rem, 2.1vw, 1.05rem);
+  font-weight: 750;
+  letter-spacing: 0.01em;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(14px);
 }
 
 .dice-buttons {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .dice-value-button {
   width: 100%;
-  min-height: 56px;
-  border: 3px solid transparent;
-  border-radius: 16px;
+  min-height: clamp(42px, 8.5vw, 58px);
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
   color: white;
-  font-size: 1rem;
-  font-weight: 800;
+  font-size: clamp(0.92rem, 2.4vw, 1.15rem);
+  font-weight: 900;
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.24);
 }
 
 .dice-value-button.kept {
@@ -199,6 +210,15 @@ body,
 
 .dice-value-button.rolling {
   animation: dice-pulse 0.8s infinite ease-in-out;
+}
+
+.dice-value-button.objective-match {
+  /* Uses the normal active result-button state so kept/pressed remains readable. */
+}
+
+.dice-value-button.objective-miss {
+  opacity: 0.5;
+  filter: grayscale(0.55) brightness(0.76);
 }
 
 @keyframes dice-pulse {
@@ -213,14 +233,16 @@ body,
 }
 
 #roll-controls {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
 #roll-controls button {
   flex: 1;
-  padding: 14px 16px;
-  border-radius: 16px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 11px;
   border: none;
   background: rgba(255, 255, 255, 0.12);
   color: white;
@@ -234,6 +256,11 @@ body,
   color: #c8c8d0;
 }
 
+#tilt-button {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.9), rgba(244, 162, 97, 0.9));
+  color: #231807;
+}
+
 #roll-controls button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -244,6 +271,115 @@ body,
   color: #ffd700;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   font-weight: bold;
+}
+
+#objective-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: clamp(10px, 2.2vw, 14px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(18, 20, 34, 0.9), rgba(13, 15, 28, 0.78));
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px);
+}
+
+#objective-panel[hidden] {
+  display: none;
+}
+
+#objective-title {
+  font-size: 0.78rem;
+  color: #c8c8d0;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+#objective-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+#objective-values {
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: clamp(4px, 1.2vw, 8px);
+}
+
+.objective-reel {
+  min-width: 0;
+  width: clamp(1.55rem, 6.8vw, 2.35rem);
+  height: clamp(1.95rem, 7.2vw, 2.7rem);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07));
+  color: #ffffff;
+  font-size: clamp(1.08rem, 3.8vw, 1.55rem);
+  font-weight: 950;
+  box-shadow: inset 0 -12px 20px rgba(0, 0, 0, 0.18), 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.objective-reel.spinning {
+  animation: objective-reel-spin 0.18s linear infinite;
+  color: #ffd700;
+}
+
+#objective-reroll-button {
+  min-height: clamp(1.95rem, 7.2vw, 2.7rem);
+  padding: 0 clamp(10px, 2.4vw, 18px);
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffe05a, #f4b000);
+  color: #211700;
+  font-size: clamp(0.64rem, 2vw, 0.82rem);
+  font-weight: 950;
+  white-space: nowrap;
+  box-shadow: 0 12px 28px rgba(244, 176, 0, 0.24);
+  cursor: pointer;
+}
+
+#objective-reroll-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@keyframes objective-reel-spin {
+  0% {
+    transform: translateY(-10%) scale(0.98);
+    filter: blur(0.2px);
+  }
+  50% {
+    transform: translateY(10%) scale(1.03);
+    filter: blur(1.3px);
+  }
+  100% {
+    transform: translateY(-10%) scale(0.98);
+    filter: blur(0.2px);
+  }
+}
+
+#objective-status {
+  color: #ffd700;
+  font-size: clamp(0.78rem, 2vw, 0.9rem);
+  font-weight: 850;
+}
+
+#objective-panel.complete {
+  border-color: rgba(90, 214, 139, 0.8);
+  box-shadow: 0 0 24px rgba(90, 214, 139, 0.28);
+}
+
+#objective-panel.complete #objective-status {
+  color: #5ad68b;
 }
 
 #friction-control,
@@ -371,5 +507,22 @@ body,
   100% {
     opacity: 0;
     transform: scale(1) translateY(-70px);
+  }
+}
+
+@media (max-width: 420px) {
+  #roll-panel {
+    top: 58px;
+    gap: 7px;
+  }
+
+  #objective-row {
+    gap: 8px;
+  }
+
+  #objective-reroll-button {
+    max-width: 6.4rem;
+    white-space: normal;
+    line-height: 1.05;
   }
 }

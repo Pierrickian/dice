@@ -11,28 +11,64 @@ const SCORING = RULES.game.scoring
 const MAX_ROLLS = ROUND.max_rolls_per_round
 const SCORE_RESET_THRESHOLD = SCORING.score_reset.threshold
 const POINTS_PER_DIE = SCORING.per_die_banked.points
+const RESULT_DISPLAY = RULES.game.result_display
+const FACE_REVEAL_AFTER_FLOOR_CONTACT_SECONDS = RESULT_DISPLAY.face_reveal_after_floor_contact_seconds
+const RULE_MODES = RULES.game.rule_modes
+const OBJECTIVE_RULES = RULES.game.objective_rules.engine
+const TABLE_TILT = RULES.game.table_tilt
+const DEFAULT_RULE_MODE = RULE_MODES.default
+const OBJECTIVE_MODE_ID = RULE_MODES.modes.find(mode => mode.engine.type === OBJECTIVE_RULES.type)?.id
+const TILT_USES_PER_ROLL = TABLE_TILT.uses_per_roll
+const TILT_DURATION_SECONDS = TABLE_TILT.duration_seconds
+const TILT_MAX_ANGLE_RADIANS = THREE.MathUtils.degToRad(TABLE_TILT.max_angle_degrees)
+const TILT_MAX_HEIGHT_CM = TABLE_TILT.max_height_cm
+const TILT_SINE_POWER = TABLE_TILT.sine_power
 
 const DEFAULT_LANGUAGE = 'fr'
 const TRANSLATIONS = {
   fr: {
     diceCountLabel: 'Nombre de dés',
     diceFacesLabel: 'Nombre de faces',
+    ruleModeLabel: 'Règle',
     menuLabel: 'Menu',
     resetButton: 'Réinitialiser',
+    tiltButton: 'Tilter la table',
+    rerollObjectiveButton: 'Relancer objectif',
     toggleLanguageLabel: 'Passer en anglais',
     toggleLanguageFlag: '🇬🇧',
-    rollHeader: (current, max) => `Lancer ${current} / ${max}`,
+    rollHeader: (current, max) => `${Math.max(0, max - current)} lancer${Math.max(0, max - current) > 1 ? 's' : ''} restant${Math.max(0, max - current) > 1 ? 's' : ''}`,
     scoreDisplay: score => `Score : ${score}`,
+    objectiveTitle: 'Objectif',
+    objectiveWaiting: 'Lance les dés pour tenter cette combinaison.',
+    objectiveSuccess: 'Objectif réussi !',
+    objectiveProgress: 'Objectif en cours…',
+    objectiveValues: values => values.join(' · '),
+    ruleModeNames: {
+      zerotonine: 'Zerotonine',
+      random_objective: 'Objectif aléatoire',
+    },
   },
   en: {
     diceCountLabel: 'Number of dice',
     diceFacesLabel: 'Number of sides',
+    ruleModeLabel: 'Rule',
     menuLabel: 'Menu',
     resetButton: 'Reset',
+    tiltButton: 'Tilt table',
+    rerollObjectiveButton: 'Reroll objective',
     toggleLanguageLabel: 'Switch to French',
     toggleLanguageFlag: '🇫🇷',
-    rollHeader: (current, max) => `Roll ${current} / ${max}`,
+    rollHeader: (current, max) => `${Math.max(0, max - current)} roll${Math.max(0, max - current) === 1 ? '' : 's'} left`,
     scoreDisplay: score => `Score: ${score}`,
+    objectiveTitle: 'Objective',
+    objectiveWaiting: 'Roll the dice to attempt this combination.',
+    objectiveSuccess: 'Objective complete!',
+    objectiveProgress: 'Objective in progress…',
+    objectiveValues: values => values.join(' · '),
+    ruleModeNames: {
+      zerotonine: 'Zerotonine',
+      random_objective: 'Random objective',
+    },
   },
 }
 let currentLanguage = DEFAULT_LANGUAGE
@@ -152,6 +188,13 @@ app.innerHTML = `
           <option value="20">20</option>
         </select>
       </div>
+      <div class="control-row">
+        <label id="rule-mode-label" for="rule-mode">Règle</label>
+        <select id="rule-mode">
+          <option value="zerotonine">Zerotonine</option>
+          <option value="random_objective" selected>Objectif aléatoire</option>
+        </select>
+      </div>
     </div>
     <div id="tuning-panel">
       <div id="friction-control">
@@ -183,8 +226,17 @@ app.innerHTML = `
     <div id="roll-panel">
       <div id="roll-header">Lancer 1 / 3</div>
       <div id="score-display">Score : 0</div>
+      <div id="objective-panel" hidden>
+        <div id="objective-title">Objectif</div>
+        <div id="objective-row">
+          <div id="objective-values" aria-live="polite"></div>
+          <button id="objective-reroll-button" type="button">Relancer objectif</button>
+        </div>
+        <div id="objective-status"></div>
+      </div>
       <div id="dice-buttons" class="dice-buttons"></div>
       <div id="roll-controls">
+        <button id="tilt-button" type="button">Tilter la table</button>
         <button id="reset-button" type="button" class="secondary">Réinitialiser</button>
       </div>
     </div>
@@ -197,6 +249,7 @@ app.innerHTML = `
 const canvas = document.querySelector('#bg')
 const diceCountSelect = document.querySelector('#dice-count')
 const diceFacesSelect = document.querySelector('#dice-faces')
+const ruleModeSelect = document.querySelector('#rule-mode')
 const menuButton = document.querySelector('#menu-button')
 const menuPanel = document.querySelector('#menu-panel')
 const tuningButton = document.querySelector('#tuning-button')
@@ -204,10 +257,17 @@ const tuningPanel = document.querySelector('#tuning-panel')
 const languageToggle = document.querySelector('#language-toggle')
 const diceCountLabel = document.querySelector('#dice-count-label')
 const diceFacesLabel = document.querySelector('#dice-faces-label')
+const ruleModeLabel = document.querySelector('#rule-mode-label')
 const rollHeader = document.querySelector('#roll-header')
 const diceButtonsContainer = document.querySelector('#dice-buttons')
 const resetButton = document.querySelector('#reset-button')
+const tiltButton = document.querySelector('#tilt-button')
 const scoreDisplay = document.querySelector('#score-display')
+const objectivePanel = document.querySelector('#objective-panel')
+const objectiveTitle = document.querySelector('#objective-title')
+const objectiveValuesDisplay = document.querySelector('#objective-values')
+const objectiveRerollButton = document.querySelector('#objective-reroll-button')
+const objectiveStatus = document.querySelector('#objective-status')
 const scoreAnimations = document.querySelector('#score-animations')
 const frictionSlider = document.querySelector('#friction-slider')
 const frictionValue = document.querySelector('#friction-value')
@@ -230,13 +290,13 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   1000
 )
-const CAMERA_DEFAULT_POSITION = new THREE.Vector3(0, 5.4, 7.3)
+const CAMERA_DEFAULT_POSITION = new THREE.Vector3(0, 4.7, 6.35)
 const CAMERA_DEFAULT_TARGET = new THREE.Vector3(0, 0, 0)
 camera.position.copy(CAMERA_DEFAULT_POSITION)
 camera.lookAt(CAMERA_DEFAULT_TARGET)
 const cameraTarget = CAMERA_DEFAULT_TARGET.clone()
 const cameraOffset = CAMERA_DEFAULT_POSITION.clone().sub(CAMERA_DEFAULT_TARGET)
-const CAMERA_SCREEN_LOWER_TARGET_OFFSET = 3.4
+const CAMERA_SCREEN_LOWER_TARGET_OFFSET = 4.0
 const raycaster = new THREE.Raycaster()
 const pointerNdc = new THREE.Vector2()
 const dragStartScreen = new THREE.Vector2()
@@ -369,6 +429,70 @@ const floorBody = new CANNON.Body({
 floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0)
 world.addBody(floorBody)
 
+function setFloorPose(normal = new THREE.Vector3(0, 1, 0), height = FLOOR_Y) {
+  const floorQuaternion = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 0, 1),
+    normal.clone().normalize()
+  )
+  floor.quaternion.copy(floorQuaternion)
+  floor.position.y = height
+  floorBody.quaternion.set(floorQuaternion.x, floorQuaternion.y, floorQuaternion.z, floorQuaternion.w)
+  floorBody.position.y = height
+  floorBody.aabbNeedsUpdate = true
+}
+
+function getMovingRollingDice() {
+  return dice.filter((dieData) =>
+    !dieData.kept &&
+    dieData.rolling &&
+    (dieData.body.velocity.length() > 0.08 || dieData.body.angularVelocity.length() > 0.08)
+  )
+}
+
+function canUseTableTilt() {
+  return rollInProgress && !tiltActive && tiltUsesRemaining > 0 && getMovingRollingDice().length > 0
+}
+
+function updateTiltUI() {
+  tiltButton.disabled = !canUseTableTilt()
+}
+
+function startTableTilt() {
+  if (!canUseTableTilt()) return
+  tiltUsesRemaining -= 1
+  tiltActive = true
+  tiltElapsedSeconds = 0
+  const angle = Math.random() * Math.PI * 2
+  tiltDirection.set(Math.cos(angle), Math.sin(angle))
+  getMovingRollingDice().forEach(dieData => dieData.body.wakeUp())
+  updateTiltUI()
+}
+
+function stopTableTilt() {
+  tiltActive = false
+  tiltElapsedSeconds = 0
+  setFloorPose()
+}
+
+function updateTableTilt(delta) {
+  if (!tiltActive) {
+    updateTiltUI()
+    return
+  }
+
+  tiltElapsedSeconds += delta
+  const progress = Math.min(1, tiltElapsedSeconds / TILT_DURATION_SECONDS)
+  const pulse = Math.sin(Math.PI * progress) ** TILT_SINE_POWER
+  const anglePulse = pulse * Math.cos(progress * Math.PI * 2)
+  const tiltX = tiltDirection.x * TILT_MAX_ANGLE_RADIANS * anglePulse
+  const tiltZ = tiltDirection.y * TILT_MAX_ANGLE_RADIANS * anglePulse
+  const normal = new THREE.Vector3(-Math.sin(tiltZ), Math.cos(tiltX) * Math.cos(tiltZ), Math.sin(tiltX))
+  setFloorPose(normal, FLOOR_Y + TILT_MAX_HEIGHT_CM * pulse)
+
+  if (progress >= 1) stopTableTilt()
+  updateTiltUI()
+}
+
 const clock = {
   lastTime: performance.now(),
   getDelta() {
@@ -396,7 +520,7 @@ const D6_FACE_NORMALS = [
   { value: 6, normal: new THREE.Vector3(0, -1, 0) },
 ]
 const CAMERA_FALLBACK_RADIUS = 1.4
-const CAMERA_MARGIN = 1.12
+const CAMERA_MARGIN = 1.02
 const CAMERA_PAN_MAX_FACTOR = 0.75
 const MAX_DRAG_DISTANCE = 2.8
 const AIM_SUSPEND_HEIGHT = 2.15
@@ -409,6 +533,7 @@ const HAND_BOUNDARY_RESTITUTION = 0.08
 
 let dice = []
 let rollInProgress = false
+let rollFinalizationPending = false
 let aimInProgress = false
 let aimStartWorld = null
 let aimCurrentWorld = null
@@ -418,6 +543,7 @@ let activePointerId = null
 let pendingAimTimer = null
 let pendingAimData = null
 let currentFaces = Number(diceFacesSelect.value)
+let currentRuleMode = DEFAULT_RULE_MODE
 let currentRoll = 0
 let scoreCumule = 0
 let scoreGain = 0
@@ -425,6 +551,17 @@ let canFinishRound = false
 let roundFinalized = false
 let roundBonusApplied = false
 let pendingRoundReset = false
+let elapsedGameSeconds = 0
+let objectiveValues = []
+let objectiveMatched = false
+let objectiveSpinEndTimes = []
+let objectiveSpinDisplayValues = []
+let tiltUsesRemaining = 0
+let tiltActive = false
+let tiltElapsedSeconds = 0
+let tiltDirection = new THREE.Vector2(1, 0)
+
+ruleModeSelect.value = currentRuleMode
 
 setDieMass(Number(massSlider.value))
 setThrowAltitudeAngle(Number(throwAngleSlider.value))
@@ -444,8 +581,185 @@ handSphere.visible = false
 scene.add(handSphere)
 
 function getKeepableDice() {
+  if (isObjectiveMode()) {
+    return getObjectiveMatchedDieIndices()
+  }
   const values = dice.map(d => d.value)
   return computeEligibleIndices(values)
+}
+
+function isObjectiveMode() {
+  return currentRuleMode === OBJECTIVE_MODE_ID
+}
+
+function getTranslatedRuleModeName(modeId) {
+  const translations = getTranslations()
+  return translations.ruleModeNames[modeId] || modeId
+}
+
+function populateRuleModeOptions() {
+  ruleModeSelect.innerHTML = ''
+  RULE_MODES.modes.forEach((mode) => {
+    const option = document.createElement('option')
+    option.value = mode.id
+    option.textContent = getTranslatedRuleModeName(mode.id)
+    ruleModeSelect.appendChild(option)
+  })
+  ruleModeSelect.value = currentRuleMode
+}
+
+function generateObjectiveValues(count, faceCount) {
+  const objectiveCount = OBJECTIVE_RULES.use_current_dice_count ? count : count
+  const objectiveFaceCount = OBJECTIVE_RULES.use_current_face_count ? faceCount : faceCount
+  return Array.from({ length: objectiveCount }, () => Math.floor(Math.random() * objectiveFaceCount) + 1)
+}
+
+function getCurrentRolledValues() {
+  const values = dice.map(dieData => dieData.value)
+  return values.every(value => value != null) ? values : null
+}
+
+function getValueCounts(values) {
+  const counts = new Map()
+  values.forEach((value) => {
+    if (value == null) return
+    counts.set(value, (counts.get(value) || 0) + 1)
+  })
+  return counts
+}
+
+function reserveDiceForObjective({ keptOnly = false } = {}) {
+  const remaining = getValueCounts(objectiveValues)
+  const reserved = new Set()
+  const orderedDice = dice
+    .map((dieData, index) => ({ dieData, index }))
+    .filter(({ dieData }) => dieData.value != null && (!keptOnly || dieData.kept))
+    .sort((a, b) => Number(b.dieData.kept) - Number(a.dieData.kept) || a.index - b.index)
+
+  orderedDice.forEach(({ dieData, index }) => {
+    const count = remaining.get(dieData.value) || 0
+    if (count <= 0) return
+    reserved.add(index)
+    remaining.set(dieData.value, count - 1)
+  })
+
+  return reserved
+}
+
+function getObjectiveMatchedDieIndices() {
+  return isObjectiveMode() ? reserveDiceForObjective() : new Set()
+}
+
+function getUnreservedObjectiveSlotIndices() {
+  const keptCounts = getValueCounts(dice.filter(dieData => dieData.kept).map(dieData => dieData.value))
+  const unreserved = []
+  objectiveValues.forEach((value, index) => {
+    const count = keptCounts.get(value) || 0
+    if (count > 0) {
+      keptCounts.set(value, count - 1)
+    } else {
+      unreserved.push(index)
+    }
+  })
+  return unreserved
+}
+
+function valuesMatchObjective(values) {
+  if (!values || values.length !== objectiveValues.length) return false
+  const sortedValues = OBJECTIVE_RULES.match_order === 'any'
+    ? [...values].sort((a, b) => a - b)
+    : [...values]
+  const sortedObjective = OBJECTIVE_RULES.match_order === 'any'
+    ? [...objectiveValues].sort((a, b) => a - b)
+    : objectiveValues
+  return sortedValues.every((value, index) => value === sortedObjective[index])
+}
+
+function isObjectiveReelSpinning(index) {
+  return (objectiveSpinEndTimes[index] || 0) > elapsedGameSeconds
+}
+
+function hasObjectiveReelsSpinning() {
+  return objectiveValues.some((_, index) => isObjectiveReelSpinning(index))
+}
+
+function startObjectiveReelSpin(indices) {
+  indices.forEach((index) => {
+    objectiveSpinEndTimes[index] = elapsedGameSeconds + 2
+    objectiveSpinDisplayValues[index] = Math.floor(Math.random() * currentFaces) + 1
+  })
+  renderObjectiveReels()
+}
+
+function updateObjectiveReelAnimations() {
+  if (!isObjectiveMode()) return
+
+  const hadSpinningReels = hasObjectiveReelsSpinning()
+  let changed = false
+  objectiveValues.forEach((value, index) => {
+    if (!isObjectiveReelSpinning(index)) {
+      if (objectiveSpinDisplayValues[index] !== value) {
+        objectiveSpinDisplayValues[index] = value
+        changed = true
+      }
+      return
+    }
+
+    const nextDisplayValue = Math.floor(Math.random() * currentFaces) + 1
+    if (objectiveSpinDisplayValues[index] !== nextDisplayValue) {
+      objectiveSpinDisplayValues[index] = nextDisplayValue
+      changed = true
+    }
+  })
+
+  if (changed) renderObjectiveReels()
+  if (hadSpinningReels && !hasObjectiveReelsSpinning()) {
+    updateObjectiveUI()
+    renderDiceButtons()
+  }
+}
+
+function renderObjectiveReels() {
+  objectiveValuesDisplay.innerHTML = ''
+  objectiveValues.forEach((value, index) => {
+    const reel = document.createElement('div')
+    reel.className = 'objective-reel'
+    if (isObjectiveReelSpinning(index)) reel.classList.add('spinning')
+    reel.textContent = objectiveSpinDisplayValues[index] ?? value
+    objectiveValuesDisplay.appendChild(reel)
+  })
+}
+
+function rerollUnreservedObjectiveSlots() {
+  if (!isObjectiveMode() || rollInProgress || hasObjectiveReelsSpinning()) return
+  const indices = getUnreservedObjectiveSlotIndices()
+  if (indices.length === 0) return
+
+  indices.forEach((index) => {
+    objectiveValues[index] = Math.floor(Math.random() * currentFaces) + 1
+  })
+  startObjectiveReelSpin(indices)
+  updateObjectiveUI()
+  renderDiceButtons()
+}
+
+function updateObjectiveUI() {
+  const translations = getTranslations()
+  scoreDisplay.hidden = isObjectiveMode()
+  objectivePanel.hidden = !isObjectiveMode()
+  if (!isObjectiveMode()) return
+
+  objectiveTitle.textContent = translations.objectiveTitle
+  renderObjectiveReels()
+  const currentValues = getCurrentRolledValues()
+  objectiveMatched = valuesMatchObjective(currentValues)
+  objectiveStatus.textContent = objectiveMatched
+    ? translations.objectiveSuccess
+    : currentRoll === 0 || !currentValues
+      ? translations.objectiveWaiting
+      : translations.objectiveProgress
+  objectivePanel.classList.toggle('complete', objectiveMatched)
+  objectiveRerollButton.disabled = rollInProgress || hasObjectiveReelsSpinning() || getUnreservedObjectiveSlotIndices().length === 0
 }
 
 function getDieColor(index) {
@@ -493,9 +807,14 @@ function applyLocalization() {
   languageToggle.setAttribute('title', translations.toggleLanguageLabel)
   diceCountLabel.textContent = translations.diceCountLabel
   diceFacesLabel.textContent = translations.diceFacesLabel
+  ruleModeLabel.textContent = translations.ruleModeLabel
+  populateRuleModeOptions()
   resetButton.textContent = translations.resetButton
+  tiltButton.textContent = translations.tiltButton
+  objectiveRerollButton.textContent = translations.rerollObjectiveButton
   updateRollUI()
   updateScoreDisplay()
+  updateObjectiveUI()
 }
 
 function toggleLanguage() {
@@ -521,6 +840,8 @@ function renderDiceButtons() {
   diceButtonsContainer.innerHTML = ''
 
   const keepable = getKeepableDice()
+  const isObjectiveReelSettled = isObjectiveMode() && !hasObjectiveReelsSpinning()
+  const objectiveMatchedDice = isObjectiveMode() ? getObjectiveMatchedDieIndices() : new Set()
 
   dice.forEach((dieData, index) => {
     dieData.mesh.visible = !dieData.kept
@@ -539,25 +860,32 @@ function renderDiceButtons() {
     button.style.borderColor = `#${dieData.color.toString(16).padStart(6, '0')}`
     button.classList.toggle('kept', dieData.kept)
     button.classList.toggle('rolling', dieData.rolling)
-    if (!keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS) {
-      button.classList.add('disabled')
-    }
+    button.classList.toggle('objective-match', isObjectiveReelSettled && objectiveMatchedDice.has(index))
+    button.classList.toggle('objective-miss', isObjectiveMode() && dieData.value != null && !objectiveMatchedDice.has(index))
+    const isDisabledResult = isObjectiveMode()
+      ? dieData.value != null && !objectiveMatchedDice.has(index)
+      : !keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS
+    if (isDisabledResult) button.classList.add('disabled')
 
     button.addEventListener('click', () => {
-      if (currentRoll === 0 || dieData.rolling || (!keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS)) return
+      const cannotToggleObjectiveDie = isObjectiveMode() && !dieData.kept && !keepable.has(index)
+      const cannotToggleZerotonineDie = !isObjectiveMode() && !keepable.has(index) && !dieData.kept && currentRoll < MAX_ROLLS
+      if (currentRoll === 0 || dieData.rolling || cannotToggleObjectiveDie || cannotToggleZerotonineDie) return
       dieData.kept = !dieData.kept
       button.classList.toggle('kept', dieData.kept)
       dieData.mesh.visible = !dieData.kept
       if (dieData.kept) {
         dieData.body.type = CANNON.Body.STATIC
-        // Animation and score
-        showScoreAnimation(`+${POINTS_PER_DIE}`, dieData)
-        scoreGain += POINTS_PER_DIE
+        if (!isObjectiveMode()) {
+          showScoreAnimation(`+${POINTS_PER_DIE}`, dieData)
+          scoreGain += POINTS_PER_DIE
+        }
       } else {
         dieData.body.type = CANNON.Body.DYNAMIC
         dieData.body.wakeUp()
-        scoreGain -= POINTS_PER_DIE
+        if (!isObjectiveMode()) scoreGain -= POINTS_PER_DIE
       }
+      updateObjectiveUI()
       renderDiceButtons()
     })
 
@@ -1075,6 +1403,7 @@ function createDie(x, z, index) {
     value: null,
     rolling: false,
     kept: false,
+    floorContactAtSeconds: null,
     aimOrientationLocked: false,
     defaultLinearDamping: body.linearDamping,
     defaultAngularDamping: body.angularDamping,
@@ -1126,11 +1455,19 @@ function createDice(count) {
   clearDice()
   currentRoll = 0
   rollInProgress = false
+  rollFinalizationPending = false
+  stopTableTilt()
+  tiltUsesRemaining = 0
   canFinishRound = false
   roundFinalized = false
   roundBonusApplied = false
   pendingRoundReset = false
   scoreGain = 0
+  objectiveMatched = false
+  objectiveValues = isObjectiveMode() ? generateObjectiveValues(count, currentFaces) : []
+  objectiveSpinEndTimes = []
+  objectiveSpinDisplayValues = [...objectiveValues]
+  if (objectiveValues.length > 0) startObjectiveReelSpin(objectiveValues.map((_, index) => index))
   diceButtonsContainer.innerHTML = ''
 
   const radius = Math.min(2.5, 0.9 + (count - 1) * 0.3)
@@ -1143,6 +1480,8 @@ function createDice(count) {
 
   updateRollUI()
   updateScoreDisplay()
+  updateObjectiveUI()
+  updateTiltUI()
   renderDiceButtons()
   closeMenu()
 }
@@ -1179,6 +1518,7 @@ function beginHandAim(center) {
     const offset = getHandDiceOffset(index, activeDice.length)
     dieData.value = null
     dieData.rolling = false
+    dieData.floorContactAtSeconds = null
     dieData.mesh.visible = true
     dieData.aimOrientationLocked = false
     body.mass = getSimulatedDieMassKg()
@@ -1196,6 +1536,7 @@ function beginHandAim(center) {
     body.wakeUp()
   })
   syncPhysics()
+  updateObjectiveUI()
   renderDiceButtons()
 }
 
@@ -1298,12 +1639,50 @@ function syncPhysics() {
   })
 }
 
+function isBodyTouchingFloor(body) {
+  return world.contacts.some((contact) =>
+    (contact.bi === body && contact.bj === floorBody) ||
+    (contact.bi === floorBody && contact.bj === body)
+  )
+}
+
+function updateDiceFloorContactTimes() {
+  dice.forEach((dieData) => {
+    if (dieData.kept || !dieData.rolling || dieData.floorContactAtSeconds != null) return
+    if (isBodyTouchingFloor(dieData.body)) {
+      dieData.floorContactAtSeconds = elapsedGameSeconds
+    }
+  })
+}
+
+function hasDieReachedFaceRevealDelay(dieData) {
+  return dieData.floorContactAtSeconds != null &&
+    elapsedGameSeconds - dieData.floorContactAtSeconds >= FACE_REVEAL_AFTER_FLOOR_CONTACT_SECONDS
+}
+
+function updateRealtimeDieFaceValues() {
+  let hasChanged = false
+  dice.forEach((dieData) => {
+    if (dieData.kept || !dieData.rolling || !hasDieReachedFaceRevealDelay(dieData)) return
+    const nextValue = determineDieFaceValue(dieData)
+    if (dieData.value !== nextValue) {
+      dieData.value = nextValue
+      hasChanged = true
+    }
+  })
+  if (hasChanged) {
+    updateObjectiveUI()
+    renderDiceButtons()
+  }
+}
+
 function areRollingDiceSleeping() {
   return dice
     .filter((dieData) => !dieData.kept)
     .every((dieData) =>
       dieData.body.velocity.length() < 0.1 &&
       dieData.body.angularVelocity.length() < 0.1 &&
+      hasDieReachedFaceRevealDelay(dieData) &&
       isDieSettledOnFace(dieData)
     )
 }
@@ -1379,8 +1758,10 @@ function determineDieFaceValue(dieData) {
 
 function finalizeRollingDice() {
   if (!rollInProgress) return
+  if (rollFinalizationPending) return
   if (!areRollingDiceSleeping()) return
 
+  rollFinalizationPending = true
   setTimeout(() => {
     dice.forEach((dieData) => {
       if (!dieData.kept && dieData.rolling) {
@@ -1389,6 +1770,9 @@ function finalizeRollingDice() {
       }
     })
     rollInProgress = false
+    rollFinalizationPending = false
+    updateObjectiveUI()
+    updateTiltUI()
     renderDiceButtons()
   }, 500)
 }
@@ -1396,6 +1780,12 @@ function finalizeRollingDice() {
 function finalizeRound() {
   if (roundFinalized) return
   roundFinalized = true
+  if (isObjectiveMode()) {
+    scoreGain = 0
+    roundBonusApplied = true
+    updateObjectiveUI()
+    return
+  }
   const bonus = getEarlyBonus(currentRoll)
   const total = scoreGain + bonus
   if (total > 0) {
@@ -1456,7 +1846,7 @@ function getCameraFrame() {
   target.y += CAMERA_SCREEN_LOWER_TARGET_OFFSET
   const distance = Math.max(
     cameraOffset.length(),
-    getCameraDistanceForRadius(bounds.radius)
+    getCameraDistanceForBounds(bounds)
   ) * cameraZoomScale
   const position = target.clone().add(
     cameraOffset.clone().normalize().multiplyScalar(distance)
@@ -1548,7 +1938,7 @@ function rollDice(launch) {
     return
   }
 
-  if (scoreGain > 0) {
+  if (!isObjectiveMode() && scoreGain > 0) {
     scoreCumule += scoreGain
     showScoreAnimation(`+${scoreGain}`, null)
     updateScoreDisplay()
@@ -1561,17 +1951,22 @@ function rollDice(launch) {
     forceRatio: 0.55,
   }
   const throwLaunch = launch || fallbackLaunch
+  stopTableTilt()
   releaseAimedDice()
   activeDice.forEach((dieData) => {
     dieData.value = null
     dieData.rolling = true
+    dieData.floorContactAtSeconds = null
     applyDieImpulse(dieData, throwLaunch.direction, throwLaunch.forceRatio)
   })
 
   currentRoll += 1
   rollInProgress = true
+  rollFinalizationPending = false
+  tiltUsesRemaining = TILT_USES_PER_ROLL
   renderDiceButtons()
   updateRollUI()
+  updateTiltUI()
   if (currentRoll >= MAX_ROLLS) {
     canFinishRound = true
   }
@@ -1748,6 +2143,12 @@ diceFacesSelect.addEventListener('change', (event) => {
   closeMenu()
 })
 
+ruleModeSelect.addEventListener('change', (event) => {
+  currentRuleMode = event.target.value
+  createDice(Number(diceCountSelect.value))
+  closeMenu()
+})
+
 frictionSlider.addEventListener('input', (event) => {
   setGroundFriction(Number(event.target.value))
 })
@@ -1775,19 +2176,26 @@ canvas.addEventListener('pointercancel', cancelAim)
 menuButton.addEventListener('click', toggleMenu)
 tuningButton.addEventListener('click', toggleTuningMenu)
 languageToggle.addEventListener('click', toggleLanguage)
+tiltButton.addEventListener('click', startTableTilt)
+objectiveRerollButton.addEventListener('click', rerollUnreservedObjectiveSlots)
 resetButton.addEventListener('click', () => createDice(Number(diceCountSelect.value)))
 
 function animate() {
   requestAnimationFrame(animate)
 
   const delta = clock.getDelta()
+  elapsedGameSeconds += delta
   if (aimInProgress && aimCurrentWorld) {
     moveHandAim(aimCurrentWorld)
     containAimedDiceInHandSphere()
   }
+  updateTableTilt(delta)
+  updateObjectiveReelAnimations()
   world.step(timeStep, delta, 3)
   containAimedDiceInHandSphere()
+  updateDiceFloorContactTimes()
   syncPhysics()
+  updateRealtimeDieFaceValues()
   finalizeRollingDice()
   updateCameraFrame(delta)
 
@@ -1818,14 +2226,17 @@ function getVisibleDiceBounds() {
   const radius = Math.max(CAMERA_FALLBACK_RADIUS, size.length() * 0.5 + 0.45)
   center.y = Math.max(center.y, FLOOR_Y + 0.45)
 
-  return { center, radius }
+  return { center, radius, size }
 }
 
-function getCameraDistanceForRadius(radius) {
+function getCameraDistanceForBounds(bounds) {
   const verticalFov = THREE.MathUtils.degToRad(camera.fov)
   const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect)
-  const limitingFov = Math.min(verticalFov, horizontalFov)
-  return Math.max(6, (radius * CAMERA_MARGIN) / Math.sin(limitingFov / 2))
+  const horizontalSpan = Math.max(bounds.size?.x || 0, (bounds.size?.z || 0) * 0.72, bounds.radius * 1.55)
+  const verticalSpan = Math.max(bounds.size?.y || 0, bounds.radius * 1.15)
+  const horizontalDistance = (horizontalSpan * CAMERA_MARGIN * 0.5) / Math.tan(horizontalFov / 2)
+  const verticalDistance = (verticalSpan * CAMERA_MARGIN * 0.5) / Math.tan(verticalFov / 2)
+  return Math.max(4.8, horizontalDistance, verticalDistance)
 }
 
 applyLocalization()
